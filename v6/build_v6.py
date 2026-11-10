@@ -129,8 +129,8 @@ def main():
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>FORMA STUDIO v7 — 직관적 드래그 앤 드롭 웹 디자인 스튜디오 (26종 카테고리 · 252개 실물 요소)</title>
-  <meta name="description" content="왼쪽 요소 서랍에서 실물 디자인 카드를 보고 마우스로 끌어다 놓기만 하면 홈페이지에 즉시 적용되는 직관적 웹 디자인 조립 스튜디오" />
+  <title>FORMA STUDIO v8 — 실물 UI 다이렉트 캔버스 스튜디오 (26종 · 252개 라이브 UI)</title>
+  <meta name="description" content="글자 목록이 아니라 실제 렌더링된 UI를 눈으로 보고 그대로 마우스로 잡아서 옮기고 배치하는 피그마 스타일 비주얼 웹 스튜디오" />
   <style id="forma-fonts-css">
 {fonts_css}
   </style>
@@ -144,58 +144,71 @@ def main():
       <span>✕ 편집 화면으로 돌아가기 (ESC)</span>
     </button>
 
-    <!-- ROW 1: INTUITIVE MASTER COMMAND BAR -->
+    <!-- SINGLE STREAMLINED VISUAL COMMAND BAR -->
     <header class="st-topbar">
       <div class="st-brand">
-        <button type="button" id="sidebar-toggle-btn" onclick="toggleSidebar()" class="st-pill-btn">◧ 요소창 접기</button>
+        <button type="button" id="sidebar-toggle-btn" onclick="toggleSidebar()" class="st-pill-btn" title="왼쪽 실물 UI 팔레트 접기/열기">◧</button>
         <span class="st-logo-mark">F</span>
-        <span class="st-brand-name">FORMA</span>
+        <span class="st-brand-name hide-narrow">FORMA</span>
         <select id="world-select" aria-label="업종 기본 템플릿" onchange="switchWorld(this.value)" class="st-select">
-          <option value="maison">업종: 1. 럭셔리 건축 스테이</option>
-          <option value="obsidian">업종: 2. AI · 엔터프라이즈 SaaS</option>
-          <option value="botanica">업종: 3. 보태니컬 퍼퓸 · 뷰티</option>
-          <option value="eclipse">업종: 4. 미쉐린 파인다이닝</option>
-          <option value="hanlaw">업종: 5. 글로벌 로펌 · 금융자문</option>
-          <option value="kinetic">업종: 6. 크리에이티브 에이전시</option>
+          <option value="maison">1. 럭셔리 건축 스테이</option>
+          <option value="obsidian">2. AI · 엔터프라이즈 SaaS</option>
+          <option value="botanica">3. 보태니컬 퍼퓸 · 뷰티</option>
+          <option value="eclipse">4. 미쉐린 파인다이닝</option>
+          <option value="hanlaw">5. 글로벌 로펌 · 금융자문</option>
+          <option value="kinetic">6. 크리에이티브 에이전시</option>
         </select>
-        <button type="button" id="undo-btn" onclick="undoLastAction()" class="st-pill-btn" title="방금 바꾼 디자인 되돌리기 (Ctrl+Z)">↩ 되돌리기</button>
-        <button type="button" onclick="randomizeCombination()" class="st-pill-btn" title="26개 요소를 랜덤으로 조합">🎲 랜덤조합</button>
+        <button type="button" id="undo-btn" onclick="undoLastAction()" class="st-pill-btn" title="되돌리기 (Ctrl+Z)">↩</button>
+        <button type="button" onclick="randomizeCombination()" class="st-pill-btn" title="26개 UI 랜덤 조합">🎲</button>
+        <button type="button" onclick="toggleTunePopover()" class="st-pill-btn" title="여백 · 둥글기 · 포인트 컬러 미세 조절">⚙️</button>
       </div>
 
-      <!-- MODE SWITCHER: Drag-and-Drop Builder vs Full 252 Grid -->
+      <!-- DIRECT CANVAS INTERACTION SWITCHER: Move Real UI vs Edit Text vs 252 Full Grid -->
       <div class="st-mode-seg">
-        <button type="button" id="mode-btn-builder" onclick="setStudioMode('builder')" class="st-mode-btn is-active">
-          <span>🖱 드래그 조립 스튜디오</span>
+        <button type="button" id="mode-btn-builder" onclick="setStudioMode('builder')" style="display:none;"></button>
+        <button type="button" id="cmode-move" onclick="setStudioMode('builder');setCanvasInteractionMode('move')" class="st-mode-btn is-active" title="홈페이지 위 모든 버튼·카드·사진·제목 UI를 마우스로 직접 잡고 원하는 위치로 옮깁니다">
+          <span>🖐 UI 직접 이동</span>
         </button>
-        <button type="button" id="mode-btn-vault" onclick="setStudioMode('vault')" class="st-mode-btn">
-          <span>⊞ 252개 전체 펼쳐보기</span>
+        <button type="button" id="cmode-text" onclick="setStudioMode('builder');setCanvasInteractionMode('text')" class="st-mode-btn" title="홈페이지 위 글자를 클릭해 바로 타이핑 수정합니다">
+          <span>✏️ 글자 수정</span>
+        </button>
+        <button type="button" id="mode-btn-vault" onclick="setStudioMode('vault')" class="st-mode-btn" title="252개 전체 실물 UI 한눈에 펼쳐보기">
+          <span>⊞ 252개 전체보기</span>
         </button>
       </div>
 
-      <!-- VIEWPORT + PRESENTATION + DOWNLOAD + CODE EXPORT -->
+      <!-- PROPOSALS + VIEWPORT + PRESENTATION + DOWNLOAD + CODE EXPORT -->
       <div class="st-actions">
-        <div class="st-mode-seg hide-narrow">
-          <button type="button" id="vp-btn-desktop" onclick="setViewportSize('desktop')" class="st-mode-btn is-active" style="padding:4px 8px;">PC</button>
-          <button type="button" id="vp-btn-tablet" onclick="setViewportSize('tablet')" class="st-mode-btn" style="padding:4px 8px;">태블릿</button>
-          <button type="button" id="vp-btn-mobile" onclick="setViewportSize('mobile')" class="st-mode-btn" style="padding:4px 8px;">모바일</button>
+        <div class="st-mode-seg hide-narrow" title="A/B/C 시안 비교 슬롯">
+          <button type="button" id="prop-btn-A" onclick="loadProposalSlot('A')" class="st-mode-btn is-active" style="padding:3px 7px;">A</button>
+          <button type="button" id="prop-btn-B" onclick="loadProposalSlot('B')" class="st-mode-btn" style="padding:3px 7px;">B</button>
+          <button type="button" id="prop-btn-C" onclick="loadProposalSlot('C')" class="st-mode-btn" style="padding:3px 7px;">C</button>
         </div>
-        <button type="button" onclick="togglePresentationMode(true)" class="st-pill-btn hide-narrow" title="고객에게 보여줄 깔끔한 전체화면">👁 전체화면 미리보기</button>
-        <button type="button" onclick="downloadStudioSelfHTML()" class="st-pill-btn hide-narrow" style="border-color:rgba(56,189,248,0.45);color:#7DD3FC;" title="단일 .html 파일로 저장해 크롬에서 오프라인으로도 바로 열기">⬇ 파일저장</button>
-        <button type="button" onclick="openFullWebsiteExport()" class="st-pill-btn is-primary">&lt;/&gt; 완성 코드 추출</button>
+        <div class="st-mode-seg hide-narrow">
+          <button type="button" id="vp-btn-desktop" onclick="setViewportSize('desktop')" class="st-mode-btn is-active" style="padding:3px 7px;" title="데스크톱 화면">🖥</button>
+          <button type="button" id="vp-btn-tablet" onclick="setViewportSize('tablet')" class="st-mode-btn" style="padding:3px 7px;" title="태블릿 화면">📟</button>
+          <button type="button" id="vp-btn-mobile" onclick="setViewportSize('mobile')" class="st-mode-btn" style="padding:3px 7px;" title="모바일 화면">📱</button>
+        </div>
+        <button type="button" onclick="togglePresentationMode(true)" class="st-pill-btn hide-narrow" title="고객 프레젠테이션 전체화면">👁</button>
+        <button type="button" onclick="downloadStudioSelfHTML()" class="st-pill-btn hide-narrow" style="border-color:rgba(56,189,248,0.45);color:#7DD3FC;" title="단일 .html 파일로 저장해 크롬에서 오프라인으로도 바로 열기">⬇</button>
+        <button type="button" onclick="openFullWebsiteExport()" class="st-pill-btn is-primary">&lt;/&gt; 코드</button>
       </div>
     </header>
 
-    <!-- ROW 2: DRAG GUIDE + QUICK TOOLS + A/B/C COMPARE -->
-    <div id="st-subbar" class="st-subbar"></div>
+    <div id="st-subbar" style="display:none;"></div>
 
-    <!-- MAIN WORKSPACE: VISUAL ELEMENT DRAWER (LEFT) + LIVE HOMEPAGE DROP TARGET (RIGHT) -->
+    <!-- MAIN WORKSPACE: 100% PURE VISUAL UI TRAY (LEFT) + LIVE DIRECT-MOVE CANVAS (RIGHT) -->
     <div class="st-workspace">
       <aside id="st-sidebar" class="st-sidebar">
-        <nav id="st-cat-rail" class="st-cat-rail" aria-label="요소 카테고리 선택"></nav>
         <div class="st-drawer-main">
           <div class="st-drawer-top">
-            <input id="drawer-search-input" type="search" oninput="setDrawerSearch(this.value)" placeholder="🔍 버튼, 골드, 명조, 요금표, 예약 검색..." class="st-drawer-search" />
-            <div id="st-drawer-cat-head" class="st-drag-hint-bar"></div>
+            <div class="st-tray-tabs">
+              <button type="button" id="tray-tab-sections" onclick="setTrayGroup('sections')" class="st-tray-tab is-active">🧩 섹션 UI</button>
+              <button type="button" id="tray-tab-components" onclick="setTrayGroup('components')" class="st-tray-tab">🎛 부품 UI</button>
+              <button type="button" id="tray-tab-themes" onclick="setTrayGroup('themes')" class="st-tray-tab">🎨 테마 UI</button>
+            </div>
+            <div id="st-drawer-cat-head" class="st-tray-chips"></div>
+            <input id="drawer-search-input" type="search" oninput="setDrawerSearch(this.value)" placeholder="🔍 UI 검색 (히어로, 버튼, 요금표, 다크...)" class="st-drawer-search" style="width:100%;background:#141824;border:1px solid rgba(255,255,255,0.1);border-radius:7px;padding:5px 9px;color:#F8FAFC;font-size:11.5px;outline:none;" />
           </div>
           <div id="st-drawer-cards" class="st-drawer-cards"></div>
           <div id="st-hidden-secs-bar" class="st-hidden-secs-bar" style="display:none;"></div>
@@ -204,7 +217,7 @@ def main():
 
       <main class="st-stage">
         <div id="canvas-frame" class="st-canvas-frame">
-          <div id="st-drop-banner" class="st-drop-banner">✨ 여기서 마우스를 놓으면 홈페이지에 바로 적용됩니다!</div>
+          <div id="st-drop-banner" class="st-drop-banner">✨ 원하는 위치에서 마우스를 놓으세요!</div>
           <div id="website-mount"></div>
         </div>
 
@@ -219,9 +232,23 @@ def main():
     </div>
   </div>
 
-  <!-- FLOATING DRAG GHOST, SECTION INSERTION SNAP LINE & FINE-TUNE POPOVER -->
+  <!-- LIVE CLONED VISUAL UI DRAG GHOST, SECTION DROP SLOT, FIGMA SELECTION HANDLES & TOOLBAR -->
   <div id="st-drag-ghost" class="st-drag-ghost"></div>
-  <div id="st-sec-drop-line" class="st-sec-drop-line"><span id="st-sec-drop-label">➕ 여기에 배치하기</span></div>
+  <div id="st-sec-drop-line" class="st-sec-drop-line"><span id="st-sec-drop-label">+</span></div>
+  <div id="st-ui-sel-box" class="st-ui-sel-box">
+    <span class="st-ui-sel-handle nw"></span>
+    <span class="st-ui-sel-handle ne"></span>
+    <span class="st-ui-sel-handle sw"></span>
+    <span class="st-ui-sel-handle se"></span>
+  </div>
+  <div id="st-ui-toolbar" class="st-ui-toolbar">
+    <button type="button" onclick="inspectSelectedUICategory()" title="비슷한 다른 UI 보기">🎨 교체</button>
+    <button type="button" onclick="duplicateSelectedUI()" title="이 UI 복제해서 옆에 하나 더 놓기">⎘ 복제</button>
+    <button type="button" onclick="scaleSelectedUI(-0.1)" title="크기 줄이기">−</button>
+    <button type="button" onclick="scaleSelectedUI(0.1)" title="크기 키우기">+</button>
+    <button type="button" onclick="resetSelectedUIPosition()" title="원래 자리로 되돌리기">↺</button>
+    <button type="button" onclick="deleteSelectedUI()" style="color:#FCA5A5;" title="지우기 (Delete)">🗑</button>
+  </div>
   <div id="st-tune-popover" class="st-tune-popover"></div>
 
   <!-- CUSTOM CURSOR FOLLOWER -->
@@ -283,7 +310,7 @@ def main():
         ARTIFACT_DIR / 'web_design_library.html',
         BASE / 'index.html',
         BASE / 'FORMA_STUDIO_v6.html',
-        BASE / 'FORMA_STUDIO_v7.html',
+        BASE / 'FORMA_STUDIO_v8.html',
     ]
     for t in targets:
         t.write_text(html, encoding='utf-8')

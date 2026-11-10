@@ -52,6 +52,19 @@ function makeInitialProposals() {
   };
 }
 
+const TRAY_GROUPS = {
+  sections: ['hero', 'navbar', 'feature', 'gallery', 'pricing', 'form', 'stats', 'proof', 'process', 'team', 'footer', 'topbar', 'divider'],
+  components: ['button', 'surface', 'inputui', 'imgstyle', 'badge', 'widget'],
+  themes: ['palette', 'shader', 'font', 'textfx', 'motion', 'cursor', 'preloader']
+};
+
+const FEATURED_SECTION_PICKS = [
+  ['hero', 'HERO-01'], ['hero', 'HERO-02'], ['navbar', 'NAV-02'],
+  ['feature', 'FEAT-01'], ['gallery', 'GAL-01'], ['pricing', 'PRC-01'],
+  ['form', 'FRM-01'], ['stats', 'STA-01'], ['hero', 'HERO-04'],
+  ['feature', 'FEAT-03'], ['pricing', 'PRC-03'], ['footer', 'FTR-01']
+];
+
 const state = {
   mode: 'builder',          // 'builder' | 'vault'
   presentation: false,
@@ -59,10 +72,12 @@ const state = {
   sideTab: 'slots',
   viewport: 'desktop',      // 'desktop' | 'tablet' | 'mobile'
   guidesOn: true,
+  canvasMoveMode: true,     // ON by default: grab & move ANY UI directly on the webpage!
   inlineEdit: false,
   tuneOpen: false,
   worldKey: 'maison',
-  activeCat: 'button',
+  trayGroup: 'sections',    // 'sections' | 'components' | 'themes'
+  activeCat: 'featured',    // 'featured' | 'all' | specific catKey
   drawerQuery: '',
   vaultFilter: 'all',
   vaultQuery: '',
@@ -70,6 +85,10 @@ const state = {
   proposalSlot: 'A',
   proposals: makeInitialProposals(),
   undoStack: [],
+  uiOffsets: {},            // { [domPath]: { x, y, scale, hidden } }
+  freeWidgets: [],          // [ { uid, secKey, catKey, assetId, customHTML, xPct, yPx, scale } ]
+  selectedUIPath: null,
+  selectedFreeUid: null,
   exportTab: 'code',        // 'code' | 'preview'
   lastExportPreviewDoc: '',
   tokens: {
@@ -88,27 +107,41 @@ function getAsset(catKey, id) {
   return list.find(x => x.id === id) || list[0];
 }
 
+function getGroupForCat(catKey) {
+  if (TRAY_GROUPS.sections.includes(catKey)) return 'sections';
+  if (TRAY_GROUPS.components.includes(catKey)) return 'components';
+  return 'themes';
+}
+
 function showStudioToast(msg) {
   const t = document.getElementById('st-toast');
   if (!t) return;
   t.textContent = msg;
   t.classList.add('is-visible');
   clearTimeout(t._timer);
-  t._timer = setTimeout(() => t.classList.remove('is-visible'), 2500);
+  t._timer = setTimeout(() => t.classList.remove('is-visible'), 2200);
 }
 
 /* ==========================================================================
-   UNDO HISTORY STACK (Ctrl+Z / ↩ 되돌리기)
+   UNDO HISTORY STACK (Ctrl+Z / ↩) — Covers Theme, Sections, Free UI & Moves!
    ========================================================================== */
+function cloneOffsetsMap(m) {
+  const out = {};
+  Object.keys(m || {}).forEach(k => { out[k] = { ...m[k] }; });
+  return out;
+}
+
 function pushUndoSnapshot() {
   state.undoStack.push({
     worldKey: state.worldKey,
     equipped: { ...state.equipped },
     secOrder: [...state.secOrder],
     secEnabled: { ...state.secEnabled },
-    tokens: { ...state.tokens }
+    tokens: { ...state.tokens },
+    uiOffsets: cloneOffsetsMap(state.uiOffsets),
+    freeWidgets: state.freeWidgets.map(w => ({ ...w }))
   });
-  if (state.undoStack.length > 35) state.undoStack.shift();
+  if (state.undoStack.length > 40) state.undoStack.shift();
   updateUndoButtonUI();
 }
 
@@ -117,13 +150,13 @@ function updateUndoButtonUI() {
   if (!btn) return;
   const n = state.undoStack.length;
   btn.style.opacity = n > 0 ? '1' : '0.45';
-  btn.textContent = n > 0 ? `↩ 되돌리기 (${n})` : '↩ 되돌리기';
+  btn.textContent = n > 0 ? `↩ (${n})` : '↩';
 }
 
 function undoLastAction() {
   const snap = state.undoStack.pop();
   if (!snap) {
-    showStudioToast('더 이상 되돌릴 변경 내역이 없습니다.');
+    showStudioToast('되돌릴 변경 내역이 없습니다.');
     return;
   }
   state.worldKey = snap.worldKey;
@@ -131,6 +164,9 @@ function undoLastAction() {
   state.secOrder = [...snap.secOrder];
   state.secEnabled = { ...snap.secEnabled };
   state.tokens = { ...snap.tokens };
+  state.uiOffsets = cloneOffsetsMap(snap.uiOffsets);
+  state.freeWidgets = (snap.freeWidgets || []).map(w => ({ ...w }));
+  clearSelectedCanvasUI();
   const sel = document.getElementById('world-select');
   if (sel) sel.value = state.worldKey;
   updateUndoButtonUI();
@@ -138,44 +174,53 @@ function undoLastAction() {
   renderSidebarBody();
   renderLiveWebsite();
   if (state.mode === 'vault') renderVaultView();
-  showStudioToast('↩ 이전 디자인 상태로 되돌렸습니다.');
+  showStudioToast('↩ 이전 UI 상태로 되돌렸습니다.');
 }
 
 /* ==========================================================================
-   INTUITIVE HELPER SUBBAR + CLIENT A/B/C COMPARE + FINE-TUNING POPOVER
+   COMPACT CONTROLS + CLIENT A/B/C COMPARE + FINE-TUNING POPOVER
    ========================================================================== */
+function setCanvasInteractionMode(mode) {
+  // mode: 'move' | 'text' | 'preview'
+  if (mode === 'preview') {
+    togglePresentationMode(true);
+    return;
+  }
+  state.presentation = false;
+  document.getElementById('studio-app')?.classList.remove('is-presentation');
+  state.canvasMoveMode = (mode === 'move');
+  state.inlineEdit = (mode === 'text');
+  clearSelectedCanvasUI();
+
+  document.getElementById('cmode-move')?.classList.toggle('is-active', state.canvasMoveMode);
+  document.getElementById('cmode-text')?.classList.toggle('is-active', state.inlineEdit);
+
+  const site = document.getElementById('hp-root');
+  if (site) {
+    site.classList.toggle('is-move-mode', state.canvasMoveMode);
+    site.classList.toggle('is-editing', state.inlineEdit);
+    site.querySelectorAll('h1, h2, h3, p, blockquote').forEach(el => {
+      el.contentEditable = state.inlineEdit ? 'true' : 'false';
+    });
+  }
+  renderQuickSubbar();
+}
+
 function renderQuickSubbar() {
-  const el = document.getElementById('st-subbar');
-  if (!el) return;
-
-  const propBtns = ['A', 'B', 'C'].map(slot => {
-    const isAct = state.proposalSlot === slot;
-    return `<button type="button" onclick="loadProposalSlot('${slot}')" class="st-pill-btn ${isAct ? 'is-primary' : ''}" style="padding:3px 9px;font-size:12px;" title="${state.proposals[slot].label}">시안 ${slot}</button>`;
-  }).join('');
-
-  el.innerHTML = `
-    <div style="display:flex;align-items:center;gap:8px;white-space:nowrap;">
-      <span style="padding:3px 9px;border-radius:999px;background:rgba(56,189,248,0.14);border:1px solid rgba(56,189,248,0.34);color:#7DD3FC;font-size:12px;font-weight:800;">
-        💡 왼쪽 요소를 마우스로 잡고 오른쪽 홈페이지에 끌어다 놓으세요! (클릭도 바로 적용)
-      </span>
-      <button type="button" id="inline-edit-btn" onclick="toggleInlineEdit()" class="st-pill-btn ${state.inlineEdit?'is-active':''}" style="padding:3px 9px;" title="홈페이지 글자를 직접 클릭해 수정">✏️ 글자직접수정</button>
-      <button type="button" onclick="toggleTunePopover()" class="st-pill-btn ${state.tuneOpen?'is-active':''}" style="padding:3px 9px;" title="모서리 둥글기·여백·포인트색 미세조절">⚙️ 둥글기·여백</button>
-      <button type="button" onclick="triggerIntroCurtain()" class="st-pill-btn hide-narrow" style="padding:3px 9px;">🎬 오프닝시연</button>
-    </div>
-    <div style="display:flex;align-items:center;gap:5px;flex-shrink:0;">
-      <span style="font-size:12px;color:#94A3B8;margin-right:2px;" class="hide-narrow">시안 비교:</span>
-      ${propBtns}
-      <button type="button" onclick="saveCurrentToProposalSlot()" class="st-pill-btn hide-narrow" style="padding:3px 9px;" title="현재 조합을 시안 ${state.proposalSlot}에 덮어쓰기">💾 시안${state.proposalSlot} 저장</button>
-    </div>
-  `;
   renderTunePopover();
+  ['A', 'B', 'C'].forEach(slot => {
+    document.getElementById(`prop-btn-${slot}`)?.classList.toggle('is-active', state.proposalSlot === slot);
+  });
+  document.getElementById('cmode-move')?.classList.toggle('is-active', state.canvasMoveMode && !state.inlineEdit);
+  document.getElementById('cmode-text')?.classList.toggle('is-active', state.inlineEdit);
+  const el = document.getElementById('st-subbar');
+  if (el) el.style.display = 'none';
 }
 
 function toggleTunePopover(force) {
   state.tuneOpen = typeof force === 'boolean' ? force : !state.tuneOpen;
   const pop = document.getElementById('st-tune-popover');
   if (pop) pop.classList.toggle('is-open', state.tuneOpen);
-  renderQuickSubbar();
 }
 
 function renderTunePopover() {
@@ -184,40 +229,42 @@ function renderTunePopover() {
   pop.classList.toggle('is-open', state.tuneOpen);
   pop.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid rgba(255,255,255,0.09);padding-bottom:8px;">
-      <strong style="font-size:13px;color:#F8FAFC;">⚙️ 전체 홈페이지 미세 조절</strong>
+      <strong style="font-size:13px;color:#F8FAFC;">⚙️ 스타일 미세 조절</strong>
       <button type="button" onclick="toggleTunePopover(false)" class="st-pill-btn" style="padding:2px 7px;">✕</button>
     </div>
     <div>
       <div style="display:flex;justify-content:space-between;font-size:12px;font-weight:700;margin-bottom:6px;">
-        <span>버튼·카드 모서리 둥글기</span>
+        <span>모서리 둥글기</span>
         <span class="f-mono">${state.tokens.radius}px</span>
       </div>
       <input type="range" min="0" max="28" value="${state.tokens.radius}" oninput="updateToken('radius', this.value)" style="width:100%;accent-color:#38BDF8;cursor:pointer;" />
     </div>
     <div>
-      <div style="font-size:12px;font-weight:700;margin-bottom:6px;">섹션 상하 여백 넓이</div>
+      <div style="font-size:12px;font-weight:700;margin-bottom:6px;">섹션 여백</div>
       <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:5px;">
-        ${[['compact','촘촘하게'],['balanced','기본'],['editorial','넓고 여유롭게']].map(([v, lbl]) => `
+        ${[['compact','좁게'],['balanced','기본'],['editorial','넓게']].map(([v, lbl]) => `
           <button type="button" onclick="updateToken('density','${v}')" class="st-pill-btn ${state.tokens.density===v?'is-active':''}" style="justify-content:center;padding:5px 4px;">${lbl}</button>
         `).join('')}
       </div>
     </div>
-    <div>
-      <div style="display:flex;justify-content:space-between;font-size:12px;font-weight:700;margin-bottom:6px;">
-        <span>필름 질감(그레인) 농도</span>
-        <span class="f-mono">${Math.round(state.tokens.grain * 1000) / 10}%</span>
-      </div>
-      <input type="range" min="0" max="0.09" step="0.005" value="${state.tokens.grain}" oninput="updateToken('grain', this.value)" style="width:100%;accent-color:#38BDF8;cursor:pointer;" />
-    </div>
     <div style="display:flex;justify-content:space-between;align-items:center;">
-      <span style="font-size:12px;font-weight:700;">포인트 색상 직접 지정</span>
+      <span style="font-size:12px;font-weight:700;">포인트 컬러</span>
       <input type="color" value="${state.tokens.customAccent || '#8C5A32'}" oninput="updateToken('customAccent', this.value)" style="width:34px;height:26px;border:none;background:transparent;cursor:pointer;" />
     </div>
-    <div style="padding-top:8px;border-top:1px solid rgba(255,255,255,0.08);display:flex;justify-content:space-between;align-items:center;">
-      <span style="font-size:12px;font-weight:600;">섹션 위 빠른 편집바 표시</span>
-      <button type="button" onclick="updateToken('guidesOn', !state.guidesOn)" class="st-pill-btn ${state.guidesOn?'is-active':''}">${state.guidesOn?'켜짐':'꺼짐'}</button>
+    <div style="padding-top:8px;border-top:1px solid rgba(255,255,255,0.08);display:flex;gap:6px;">
+      <button type="button" onclick="resetAllMovedElements()" class="st-pill-btn" style="flex:1;justify-content:center;">↺ 이동한 UI 전체 원위치</button>
+      <button type="button" onclick="saveCurrentToProposalSlot()" class="st-pill-btn is-primary">💾 시안${state.proposalSlot}</button>
     </div>
   `;
+}
+
+function resetAllMovedElements() {
+  pushUndoSnapshot();
+  state.uiOffsets = {};
+  state.freeWidgets = [];
+  clearSelectedCanvasUI();
+  renderLiveWebsite();
+  showStudioToast('모든 UI 위치를 기본 정렬로 초기화했습니다.');
 }
 
 function loadProposalSlot(slot) {
@@ -230,23 +277,24 @@ function loadProposalSlot(slot) {
   if (sel) sel.value = state.worldKey;
   state.equipped = { ...snap.equipped };
   state.tokens = { ...snap.tokens };
+  clearSelectedCanvasUI();
   renderQuickSubbar();
   renderSidebarBody();
   renderLiveWebsite();
   if (state.mode === 'vault') renderVaultView();
-  showStudioToast(`[시안 ${slot}] 조합으로 전환되었습니다.`);
+  showStudioToast(`시안 ${slot} 적용`);
 }
 
 function saveCurrentToProposalSlot() {
   const slot = state.proposalSlot;
   state.proposals[slot] = {
-    label: `시안 ${slot} · 커스텀 저장본`,
+    label: `시안 ${slot}`,
     worldKey: state.worldKey,
     equipped: { ...state.equipped },
     tokens: { ...state.tokens }
   };
   renderQuickSubbar();
-  showStudioToast(`현재 홈페이지 조합이 [시안 ${slot}]에 저장되었습니다.`);
+  showStudioToast(`시안 ${slot}에 현재 UI 조합 저장 완료`);
 }
 
 /* ==========================================================================
@@ -257,8 +305,11 @@ let drawerShaderRAF = null;
 
 function setStudioMode(mode) {
   state.mode = mode;
+  clearSelectedCanvasUI();
   document.getElementById('mode-btn-builder')?.classList.toggle('is-active', mode === 'builder');
   document.getElementById('mode-btn-vault')?.classList.toggle('is-active', mode === 'vault');
+  document.getElementById('cmode-move')?.classList.toggle('is-active', mode === 'builder' && state.canvasMoveMode && !state.inlineEdit);
+  document.getElementById('cmode-text')?.classList.toggle('is-active', mode === 'builder' && state.inlineEdit);
   const vv = document.getElementById('vault-view');
   if (vv) vv.classList.toggle('is-open', mode === 'vault');
   if (mode === 'vault') {
@@ -271,12 +322,13 @@ function setStudioMode(mode) {
 
 function togglePresentationMode(force) {
   state.presentation = typeof force === 'boolean' ? force : !state.presentation;
+  clearSelectedCanvasUI();
   document.getElementById('studio-app')?.classList.toggle('is-presentation', state.presentation);
   if (state.presentation) {
     setStudioMode('builder');
     state.tuneOpen = false;
     renderTunePopover();
-    showStudioToast('고객 미팅용 깔끔한 전체화면 모드입니다 (ESC로 편집 복귀)');
+    showStudioToast('전체화면 미리보기 (ESC로 복귀)');
   }
 }
 
@@ -284,16 +336,19 @@ function toggleSidebar() {
   state.sidebarOpen = !state.sidebarOpen;
   document.getElementById('st-sidebar')?.classList.toggle('is-collapsed', !state.sidebarOpen);
   const btn = document.getElementById('sidebar-toggle-btn');
-  if (btn) btn.textContent = state.sidebarOpen ? '◧ 요소창 접기' : '◨ 요소창 열기';
+  if (btn) btn.textContent = state.sidebarOpen ? '◧' : '◨ UI패널';
 }
 
 function setSideTab(tab) {
   state.sideTab = tab;
-  renderSidebarBody();
+  if (tab === 'composer') setTrayGroup('sections');
+  else if (tab === 'tokens') toggleTunePopover(true);
+  else renderSidebarBody();
 }
 
 function setViewportSize(vp) {
   state.viewport = vp;
+  clearSelectedCanvasUI();
   const cf = document.getElementById('canvas-frame');
   if (cf) {
     cf.classList.remove('vp-tablet', 'vp-mobile');
@@ -306,16 +361,7 @@ function setViewportSize(vp) {
 }
 
 function toggleInlineEdit() {
-  state.inlineEdit = !state.inlineEdit;
-  renderQuickSubbar();
-  const site = document.getElementById('hp-root');
-  if (site) {
-    site.classList.toggle('is-editing', state.inlineEdit);
-    site.querySelectorAll('h1, h2, h3, p, blockquote').forEach(el => {
-      el.contentEditable = state.inlineEdit ? 'true' : 'false';
-    });
-  }
-  showStudioToast(state.inlineEdit ? '✏️ 글자 직접 수정 켜짐: 홈페이지의 글씨를 클릭해 바로 타이핑하세요.' : '글자 직접 수정 모드를 껐습니다.');
+  setCanvasInteractionMode(state.inlineEdit ? 'move' : 'text');
 }
 
 function switchWorld(worldKey) {
@@ -325,13 +371,16 @@ function switchWorld(worldKey) {
   state.worldKey = worldKey;
   state.tokens.customAccent = null;
   state.equipped = { ...w.preset };
+  state.uiOffsets = {};
+  state.freeWidgets = [];
   state.reviewIdx = 0;
+  clearSelectedCanvasUI();
   renderQuickSubbar();
   renderSidebarBody();
   renderLiveWebsite();
   if (state.mode === 'vault') renderVaultView();
   document.getElementById('canvas-frame')?.scrollTo({ top: 0, behavior: 'smooth' });
-  showStudioToast(`${w.brand} 업종 템플릿이 적용되었습니다.`);
+  showStudioToast(`${w.brand} UI 로드 완료`);
 }
 
 function randomizeCombination() {
@@ -345,22 +394,37 @@ function randomizeCombination() {
     }
   });
   state.tokens.customAccent = null;
+  clearSelectedCanvasUI();
   renderQuickSubbar();
   renderSidebarBody();
   renderLiveWebsite();
   if (state.mode === 'vault') renderVaultView();
-  showStudioToast('🎲 26개 요소를 랜덤으로 새롭게 조합했습니다! (↩ 되돌리기 가능)');
+  showStudioToast('🎲 랜덤 UI 조합 적용!');
+}
+
+function setTrayGroup(grp) {
+  state.trayGroup = grp;
+  state.drawerQuery = '';
+  const inp = document.getElementById('drawer-search-input');
+  if (inp) inp.value = '';
+  if (grp === 'sections') state.activeCat = 'featured';
+  else if (grp === 'components') state.activeCat = 'button';
+  else state.activeCat = 'palette';
+  renderSidebarBody();
+  document.getElementById('st-drawer-cards')?.scrollTo?.({ top: 0, behavior: 'smooth' });
 }
 
 function selectSlotCategory(catKey) {
+  if (catKey !== 'featured' && catKey !== 'all') {
+    state.trayGroup = getGroupForCat(catKey);
+  }
   state.activeCat = catKey;
   state.drawerQuery = '';
   const inp = document.getElementById('drawer-search-input');
   if (inp) inp.value = '';
   if (!state.sidebarOpen) toggleSidebar();
   renderSidebarBody();
-  const cardsEl = document.getElementById('st-drawer-cards');
-  if (cardsEl && cardsEl.scrollTo) cardsEl.scrollTo({ top: 0, behavior: 'smooth' });
+  document.getElementById('st-drawer-cards')?.scrollTo?.({ top: 0, behavior: 'smooth' });
   const meta = CATEGORIES.find(c => c.key === catKey);
   if (meta?.secId && state.mode === 'builder') {
     document.getElementById(meta.secId)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -370,10 +434,6 @@ function selectSlotCategory(catKey) {
 function focusDrawerCategory(catKey) {
   setStudioMode('builder');
   selectSlotCategory(catKey);
-  const meta = CATEGORIES.find(c => c.key === catKey);
-  if (meta) {
-    showStudioToast(`왼쪽 서랍에 [${meta.icon} ${meta.shortName}] 목록을 열었습니다. 원하는 카드를 끌어다 놓으세요!`);
-  }
 }
 
 function setDrawerSearch(q) {
@@ -387,7 +447,7 @@ function equipAsset(catKey, assetId, jumpToBuilder = false) {
   if (CATEGORIES.find(c => c.key === catKey)?.group === 'section') {
     state.secEnabled[catKey] = true;
   }
-  state.activeCat = catKey;
+  clearSelectedCanvasUI();
   renderQuickSubbar();
   renderSidebarBody();
   renderLiveWebsite();
@@ -411,7 +471,6 @@ function equipAsset(catKey, assetId, jumpToBuilder = false) {
       }
     }, 40);
   }
-  showStudioToast(`✓ [${meta ? meta.shortName : catKey}] "${item.name}" 적용 완료!`);
 }
 
 function cycleSlot(catKey, dir, ev) {
@@ -431,6 +490,7 @@ function moveSectionOrder(secKey, dir) {
   const arr = [...state.secOrder];
   [arr[idx], arr[target]] = [arr[target], arr[idx]];
   state.secOrder = arr;
+  clearSelectedCanvasUI();
   renderSidebarBody();
   renderLiveWebsite();
 }
@@ -438,6 +498,7 @@ function moveSectionOrder(secKey, dir) {
 function toggleSectionVisible(secKey) {
   pushUndoSnapshot();
   state.secEnabled[secKey] = !state.secEnabled[secKey];
+  clearSelectedCanvasUI();
   renderSidebarBody();
   renderLiveWebsite();
 }
@@ -445,15 +506,15 @@ function toggleSectionVisible(secKey) {
 function hideSectionWithUndo(secKey) {
   pushUndoSnapshot();
   state.secEnabled[secKey] = false;
+  clearSelectedCanvasUI();
   renderSidebarBody();
   renderLiveWebsite();
-  const meta = CATEGORIES.find(c => c.key === secKey);
-  showStudioToast(`[${meta?.shortName || secKey}] 섹션을 뺐습니다. 왼쪽 하단 복구 버튼이나 ↩ 되돌리기로 복구 가능합니다.`);
 }
 
 function restoreHiddenSection(secKey) {
   pushUndoSnapshot();
   state.secEnabled[secKey] = true;
+  clearSelectedCanvasUI();
   renderSidebarBody();
   renderLiveWebsite();
   setTimeout(() => document.getElementById('sec-' + secKey)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50);
@@ -470,8 +531,48 @@ function updateToken(key, val) {
 }
 
 /* ==========================================================================
-   SIDE-BY-SIDE VISUAL DRAG DRAWER (100% Live Visual Previews Next to Page!)
+   100% PURE VISUAL UI THUMBNAILS (ZERO Meta-Text Descriptions — Real UI Only!)
    ========================================================================== */
+const SAMPLE_BTN_LABELS = ['예약하기 →', '시작하기 ↗', '컬렉션 보기', '무료 체험', '상담 신청 →', 'VIEW MORE'];
+
+function renderFreeComponentHTML(catKey, item) {
+  const w = WORLDS[state.worldKey] || WORLDS.maison;
+  const ctx = {
+    bdgCls: getAsset('badge', state.equipped.badge).cls,
+    tfxId: state.equipped.textfx,
+    btn: (l) => getAsset('button', state.equipped.button).render(l)
+  };
+  if (catKey === 'button') {
+    const idx = Math.max(0, (VAULT.button || []).indexOf(item));
+    return item.render(SAMPLE_BTN_LABELS[idx % SAMPLE_BTN_LABELS.length]);
+  }
+  if (catKey === 'surface') {
+    return `<div class="${item.cls}" style="width:236px;">
+      <div class="f-card" style="padding:12px;display:flex;flex-direction:column;gap:8px;">
+        <div style="height:82px;border-radius:6px;overflow:hidden;"><img src="${IMG[w.heroImg]}" alt="" style="width:100%;height:100%;object-fit:cover;display:block;"/></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <strong style="font-size:13px;">${w.works[0].title}</strong>
+          <span class="f-mono" style="font-size:11px;color:var(--accent);font-weight:700;">★ 4.9</span>
+        </div>
+      </div>
+    </div>`;
+  }
+  if (catKey === 'inputui') {
+    return `<div style="background:var(--surface);padding:10px 12px;border-radius:10px;border:1px solid var(--border);box-shadow:0 12px 28px rgba(0,0,0,0.14);">${item.demo()}</div>`;
+  }
+  if (catKey === 'imgstyle') {
+    return `<div class="${item.cls}" style="width:210px;"><div class="f-media" style="width:210px;height:132px;"><img src="${IMG[w.secImg1]}" alt=""/></div></div>`;
+  }
+  if (catKey === 'badge') {
+    return `<span class="${item.cls}">${w.eyebrow}</span>`;
+  }
+  if (catKey === 'widget') {
+    const raw = item.render(w, ctx);
+    return raw ? `<div style="zoom:0.8;">${raw.replace(/position:sticky;/g, 'position:relative;')}</div>` : `<span class="f-bdg">CLEAN</span>`;
+  }
+  return item.render ? item.render('ACTION →') : '';
+}
+
 function renderDrawerVisualStage(catKey, item) {
   const w     = WORLDS[state.worldKey] || WORLDS.maison;
   const pal   = getAsset('palette', state.equipped.palette);
@@ -485,65 +586,86 @@ function renderDrawerVisualStage(catKey, item) {
   const ctx   = { bdgCls: bdg.cls, tfxId: tfx.id, btn: (l) => btn.render(l) };
 
   if (catKey === 'palette') {
-    return `<div class="${item.cls}" style="width:100%;padding:11px 12px;border-radius:8px;background:var(--bg);color:var(--fg);border:1px solid var(--border);display:flex;flex-direction:column;gap:8px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;">
-        <strong style="font-family:var(--font-display);font-size:14px;">${w.brand}</strong>
-        <span style="padding:3px 9px;border-radius:999px;background:var(--accent);color:var(--accent-fg);font-size:11px;font-weight:700;">버튼 색감</span>
+    // Render a real miniature webpage UI mockup in this exact palette!
+    return `<div class="${item.cls} ${fnt.cls}" style="width:100%;padding:10px 12px;background:var(--bg);color:var(--fg);display:flex;flex-direction:column;gap:8px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--border);padding-bottom:6px;">
+        <span style="font-family:var(--font-display);font-size:12px;font-weight:700;">${w.brand}</span>
+        <div style="display:flex;gap:4px;">
+          ${item.swatches.map(s => `<span style="width:11px;height:11px;border-radius:99px;background:${s};border:1px solid rgba(128,128,128,0.3);"></span>`).join('')}
+        </div>
       </div>
-      <div style="display:flex;gap:5px;">
-        ${item.swatches.map(s => `<div style="flex:1;height:20px;border-radius:5px;background:${s};border:1px solid rgba(128,128,128,0.28);"></div>`).join('')}
+      <div style="display:grid;grid-template-columns:1.2fr 1fr;gap:8px;align-items:center;">
+        <div>
+          <div style="font-family:var(--font-display);font-size:13.5px;font-weight:700;line-height:1.22;">${w.h1Accent}</div>
+          <span style="display:inline-block;margin-top:6px;padding:4px 10px;border-radius:999px;background:var(--accent);color:var(--accent-fg);font-size:10px;font-weight:700;">Explore →</span>
+        </div>
+        <div style="height:52px;border-radius:6px;overflow:hidden;border:1px solid var(--border);">
+          <img src="${IMG[w.heroImg]}" alt="" style="width:100%;height:100%;object-fit:cover;display:block;"/>
+        </div>
       </div>
     </div>`;
   }
 
   if (catKey === 'shader') {
-    if (item.mode !== 'none') {
-      return `<div class="${pal.cls}" style="width:100%;height:90px;border-radius:8px;background:var(--bg);color:var(--fg);border:1px solid var(--border);position:relative;overflow:hidden;display:flex;align-items:center;justify-content:center;">
-        <canvas class="drawer-shader-canvas" data-mode="${item.mode}" width="260" height="90" style="position:absolute;inset:0;width:100%;height:100%;"></canvas>
-        <span class="f-mono" style="position:relative;z-index:2;padding:3px 9px;border-radius:999px;background:color-mix(in srgb, var(--surface) 80%, transparent);border:1px solid var(--border);font-size:11px;color:var(--accent);font-weight:700;">LIVE · ${item.mode.toUpperCase()}</span>
-      </div>`;
-    }
-    return `<div class="${pal.cls} ${item.cls}" style="width:100%;height:84px;border-radius:8px;background-color:var(--bg);color:var(--fg);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;">
-      <span style="font-size:12px;font-weight:700;">${item.name}</span>
+    return `<div class="${pal.cls} ${item.cls || ''}" style="width:100%;height:96px;background-color:var(--bg);color:var(--fg);position:relative;overflow:hidden;display:flex;align-items:center;justify-content:center;">
+      ${item.mode !== 'none' ? `<canvas class="drawer-shader-canvas" data-mode="${item.mode}" width="290" height="96" style="position:absolute;inset:0;width:100%;height:100%;"></canvas>` : ''}
+      <div style="position:relative;z-index:2;padding:8px 14px;border-radius:10px;background:color-mix(in srgb, var(--surface) 78%, transparent);backdrop-filter:blur(8px);border:1px solid var(--border);display:flex;align-items:center;gap:10px;">
+        <div style="width:28px;height:28px;border-radius:6px;overflow:hidden;"><img src="${IMG[w.heroImg]}" alt="" style="width:100%;height:100%;object-fit:cover;"/></div>
+        <div>
+          <div style="font-size:11px;font-weight:800;">${w.brand}</div>
+          <div style="width:48px;height:4px;border-radius:99px;background:var(--accent);margin-top:4px;"></div>
+        </div>
+      </div>
     </div>`;
   }
 
   if (catKey === 'font') {
-    return `<div class="${pal.cls} ${item.cls}" style="width:100%;padding:12px;border-radius:8px;background:var(--bg);color:var(--fg);border:1px solid var(--border);text-align:center;">
-      <div style="font-family:var(--font-display);font-weight:var(--display-weight);letter-spacing:var(--display-track);font-size:19px;line-height:1.2;">${item.sample}</div>
-      <div style="font-family:var(--font-body);font-size:11px;color:var(--sub);margin-top:5px;">빛과 여백의 건축 · 012345</div>
+    return `<div class="${pal.cls} ${item.cls}" style="width:100%;padding:12px;background:var(--bg);color:var(--fg);display:flex;align-items:center;justify-content:space-between;gap:8px;">
+      <div>
+        <div style="font-family:var(--font-display);font-weight:var(--display-weight);letter-spacing:var(--display-track);font-size:19px;line-height:1.15;">${w.h1Accent}</div>
+        <div style="font-family:var(--font-body);font-size:11px;color:var(--sub);margin-top:3px;">${item.sample}</div>
+      </div>
+      <span style="padding:4px 9px;border-radius:999px;background:var(--fg);color:var(--bg);font-size:10px;font-weight:700;">Aa</span>
     </div>`;
   }
 
   if (catKey === 'textfx') {
-    return `<div class="${pal.cls} ${fnt.cls} ${item.cls}" style="width:100%;padding:12px;border-radius:8px;background:var(--bg);color:var(--fg);border:1px solid var(--border);text-align:center;">
-      <div class="f-h2" style="font-size:18px;">${fmtHeadline('시간을 초월한', '건축 미학', item.id)}</div>
+    return `<div class="${pal.cls} ${fnt.cls} ${item.cls}" style="width:100%;padding:13px 10px;background:var(--bg);color:var(--fg);text-align:center;">
+      <div class="f-h2" style="font-size:18px;">${fmtHeadline(w.h1Pre, w.h1Accent, item.id)}</div>
     </div>`;
   }
 
   if (catKey === 'button') {
-    return `<div class="${pal.cls} ${fnt.cls}" style="width:100%;padding:14px 10px;border-radius:8px;background:var(--bg);color:var(--fg);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;zoom:0.9;">
-      ${item.render('버튼 디자인 미리보기')}
+    const idx = Math.max(0, (VAULT.button || []).indexOf(item));
+    const lbl = SAMPLE_BTN_LABELS[idx % SAMPLE_BTN_LABELS.length];
+    return `<div class="${pal.cls} ${fnt.cls}" style="width:100%;min-height:66px;padding:8px 6px;border-radius:8px;background:var(--bg);color:var(--fg);display:flex;align-items:center;justify-content:center;zoom:0.78;">
+      ${item.render(lbl)}
     </div>`;
   }
 
   if (catKey === 'surface') {
-    return `<div class="${pal.cls} ${fnt.cls} ${item.cls}" style="width:100%;padding:10px;border-radius:8px;background:var(--bg);color:var(--fg);">
-      <div class="f-card" style="padding:12px 14px;">
-        <div style="font-size:12px;font-weight:700;">${item.name}</div>
-        <div style="font-size:11px;color:var(--sub);margin-top:3px;">카드 테두리·그림자·유리 질감</div>
+    return `<div class="${pal.cls} ${fnt.cls} ${item.cls}" style="width:100%;padding:10px;background:var(--bg);color:var(--fg);">
+      <div class="f-card" style="padding:10px;display:grid;grid-template-columns:68px 1fr;gap:10px;align-items:center;">
+        <div style="height:52px;border-radius:6px;overflow:hidden;"><img src="${IMG[w.works[0].img]}" alt="" style="width:100%;height:100%;object-fit:cover;display:block;"/></div>
+        <div>
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <span style="font-size:12px;font-weight:800;">${w.works[0].title}</span>
+            <span style="width:8px;height:8px;border-radius:99px;background:var(--accent);"></span>
+          </div>
+          <div style="font-size:11px;color:var(--sub);margin-top:3px;">${w.works[0].price}</div>
+        </div>
       </div>
     </div>`;
   }
 
   if (catKey === 'imgstyle') {
-    return `<div class="${pal.cls} ${item.cls}" style="width:100%;padding:10px;border-radius:8px;background:var(--bg);border:1px solid var(--border);display:flex;justify-content:center;">
-      <div class="f-media" style="width:156px;height:90px;"><img src="${IMG[w.heroImg]}" alt="${item.name}"/></div>
+    return `<div class="${pal.cls} ${item.cls}" style="width:100%;padding:10px;background:var(--bg);display:flex;justify-content:center;">
+      <div class="f-media" style="width:100%;height:96px;"><img src="${IMG[w.heroImg]}" alt=""/></div>
     </div>`;
   }
 
   if (catKey === 'inputui') {
-    return `<div class="${pal.cls} ${fnt.cls}" style="width:100%;padding:12px 10px;border-radius:8px;background:var(--bg);color:var(--fg);border:1px solid var(--border);display:flex;justify-content:center;zoom:0.86;">
+    return `<div class="${pal.cls} ${fnt.cls}" style="width:100%;padding:12px 10px;background:var(--bg);color:var(--fg);display:flex;justify-content:center;zoom:0.84;">
       ${item.demo()}
     </div>`;
   }
@@ -554,57 +676,58 @@ function renderDrawerVisualStage(catKey, item) {
       : item.mode === 'pill'
       ? `<span class="f-mono" style="padding:4px 12px;border-radius:999px;background:var(--fg);color:var(--bg);font-size:10px;font-weight:700;">EXPLORE ↗</span>`
       : item.mode === 'diff'
-      ? `<span style="width:34px;height:34px;border-radius:999px;background:#FFFFFF;mix-blend-mode:difference;display:inline-block;"></span>`
+      ? `<span style="width:36px;height:36px;border-radius:999px;background:#FFFFFF;mix-blend-mode:difference;display:inline-block;"></span>`
       : item.mode === 'halo'
-      ? `<span style="width:66px;height:66px;border-radius:999px;background:radial-gradient(circle,rgba(212,163,89,0.5) 0%,transparent 70%);display:inline-block;"></span>`
+      ? `<span style="width:68px;height:68px;border-radius:999px;background:radial-gradient(circle,rgba(212,163,89,0.55) 0%,transparent 70%);display:inline-block;"></span>`
       : item.mode === 'trail'
-      ? `<span style="display:inline-flex;align-items:center;gap:5px;"><span style="width:6px;height:6px;border-radius:99px;background:#FDE68A;opacity:0.4;"></span><span style="width:9px;height:9px;border-radius:99px;background:#F59E0B;opacity:0.7;"></span><span style="width:18px;height:18px;border-radius:99px;border:1.5px solid #D4A359;"></span></span>`
-      : `<span style="width:36px;height:36px;border-radius:999px;border:1.5px solid var(--accent);display:inline-flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;">VIEW</span>`;
-    return `<div class="${pal.cls}" style="width:100%;height:84px;border-radius:8px;background:var(--bg);color:var(--fg);border:1px solid var(--border);display:flex;align-items:center;justify-content:space-around;padding:10px;">
-      <span style="font-size:12px;font-weight:700;">마우스 포인터 연출</span>
-      ${badgeVisual}
+      ? `<span style="display:inline-flex;align-items:center;gap:5px;"><span style="width:6px;height:6px;border-radius:99px;background:#FDE68A;opacity:0.4;"></span><span style="width:10px;height:10px;border-radius:99px;background:#F59E0B;opacity:0.7;"></span><span style="width:20px;height:20px;border-radius:99px;border:1.5px solid #D4A359;"></span></span>`
+      : `<span style="width:38px;height:38px;border-radius:999px;border:1.5px solid var(--accent);display:inline-flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;background:rgba(10,12,18,0.75);color:#fff;">VIEW</span>`;
+    return `<div class="${pal.cls}" style="width:100%;height:84px;background:var(--bg);color:var(--fg);position:relative;overflow:hidden;display:flex;align-items:center;justify-content:center;">
+      <img src="${IMG[w.secImg1]}" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:0.42;"/>
+      <div style="position:relative;z-index:2;">${badgeVisual}</div>
     </div>`;
   }
 
   if (catKey === 'motion') {
-    const animStyle = item.demoAnim ? `animation:${item.demoAnim} 3s cubic-bezier(0.16,1,0.3,1) infinite;` : '';
-    return `<div class="${pal.cls}" style="width:100%;height:88px;border-radius:8px;background:var(--bg);color:var(--fg);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;overflow:hidden;">
-      <div style="padding:8px 14px;border-radius:8px;background:var(--surface);border:1px solid var(--border);display:flex;align-items:center;gap:9px;${animStyle}">
-        <span style="width:10px;height:10px;border-radius:999px;background:var(--accent);"></span>
-        <span style="font-size:12px;font-weight:700;">${item.name}</span>
+    const animStyle = item.demoAnim ? `animation:${item.demoAnim} 2.6s cubic-bezier(0.16,1,0.3,1) infinite;` : '';
+    return `<div class="${pal.cls}" style="width:100%;height:88px;background:var(--bg);color:var(--fg);display:flex;align-items:center;justify-content:center;overflow:hidden;">
+      <div style="width:170px;padding:8px 10px;border-radius:8px;background:var(--surface);border:1px solid var(--border);box-shadow:0 10px 24px rgba(0,0,0,0.12);display:flex;align-items:center;gap:8px;${animStyle}">
+        <img src="${IMG[w.heroImg]}" alt="" style="width:32px;height:32px;border-radius:5px;object-fit:cover;"/>
+        <div style="flex:1;"><div style="height:6px;width:75%;border-radius:99px;background:var(--fg);"></div><div style="height:5px;width:48%;border-radius:99px;background:var(--accent);margin-top:5px;"></div></div>
       </div>
     </div>`;
   }
 
   if (catKey === 'badge') {
-    return `<div class="${pal.cls}" style="width:100%;padding:14px;border-radius:8px;background:var(--bg);color:var(--fg);border:1px solid var(--border);display:flex;justify-content:center;">
+    return `<div class="${pal.cls}" style="width:100%;min-height:58px;padding:8px;border-radius:8px;background:var(--bg);color:var(--fg);display:flex;align-items:center;justify-content:center;zoom:0.85;">
       <span class="${item.cls}">${w.eyebrow}</span>
     </div>`;
   }
 
   if (catKey === 'preloader') {
-    return `<div class="${pal.cls}" style="width:100%;height:82px;border-radius:8px;background:var(--bg);color:var(--fg);border:1px solid var(--border);position:relative;overflow:hidden;display:flex;align-items:center;justify-content:center;">
-      <div style="position:absolute;top:0;left:0;height:4px;width:68%;background:var(--accent);"></div>
-      <span style="font-size:12px;font-weight:700;">${item.mode.includes('Curtain') ? '🎬 풀스크린 오프닝 커튼' : '📏 스크롤 진행 인디케이터'}</span>
+    return `<div class="${pal.cls}" style="width:100%;height:82px;background:#0A0C12;color:#F8FAFC;position:relative;overflow:hidden;display:flex;align-items:center;justify-content:center;">
+      <img src="${IMG[w.heroImg]}" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:0.35;"/>
+      <div style="position:absolute;top:0;left:0;height:3px;width:72%;background:var(--accent);box-shadow:0 0 10px var(--accent);"></div>
+      <div style="position:relative;z-index:2;padding:4px 12px;border-radius:999px;background:rgba(9,11,16,0.85);border:1px solid rgba(255,255,255,0.18);font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;">${item.mode.includes('Curtain') ? `${w.brand} · 100%` : 'SCROLL 72%'}</div>
     </div>`;
   }
 
   if (catKey === 'widget') {
     const raw = item.render(w, ctx);
     if (!raw) {
-      return `<div class="${pal.cls}" style="width:100%;height:78px;border-radius:8px;background:var(--bg);color:var(--sub);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:12px;">하단 고정바 숨김 (깔끔한 화면)</div>`;
+      return `<div class="${pal.cls}" style="width:100%;height:68px;background:var(--bg);border:1px dashed var(--border);display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--sub);">CLEAN STAGE</div>`;
     }
-    return `<div class="${pal.cls} ${fnt.cls}" style="width:100%;height:88px;border-radius:8px;background:var(--bg);color:var(--fg);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;overflow:hidden;padding:6px;">
+    return `<div class="${pal.cls} ${fnt.cls}" style="width:100%;height:84px;background:var(--bg);color:var(--fg);display:flex;align-items:center;justify-content:center;overflow:hidden;padding:4px;">
       <div style="zoom:0.56;width:100%;">${raw.replace(/position:sticky;/g, 'position:relative;')}</div>
     </div>`;
   }
 
-  /* 14 ~ 26: Live Scaled Full-Page Section Thumbnail! */
+  /* 14 ~ 26: Live Scaled Full-Page Section UI! */
   const secHTML = typeof item.render === 'function' ? item.render(w, ctx) : '';
   return `<div class="st-drawer-sec-shell ${pal.cls} ${fnt.cls} ${tfx.cls} ${srf.cls} ${imgst.cls} ${inp.cls || ''}">
     ${secHTML
       ? `<div class="st-drawer-sec-scale">${secHTML}</div>`
-      : `<div style="height:100%;display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--sub);">여백/숨김 모드</div>`}
+      : `<div style="height:56px;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--sub);">SPACER</div>`}
   </div>`;
 }
 
@@ -619,29 +742,27 @@ function initDrawerShaders(container) {
     cv,
     ctx: typeof cv.getContext === 'function' ? cv.getContext('2d') : null,
     mode: cv.dataset.mode,
-    motes: Array.from({ length: 14 }, (_, i) => ({ x: (i * 47) % 260, y: (i * 29) % 90, vx: 0.22, vy: -0.18, r: 1.3 }))
+    motes: Array.from({ length: 14 }, (_, i) => ({ x: (i * 47) % 290, y: (i * 29) % 96, vx: 0.22, vy: -0.18, r: 1.3 }))
   })).filter(s => s.ctx);
   if (!items.length) return;
   let t = 0;
   function tick() {
     if (state.mode !== 'builder' || !state.sidebarOpen) return;
     t += 0.022;
-    items.forEach(s => drawShaderFrame(s.ctx, s.cv.width, s.cv.height, s.mode, accentHex, t, s.motes, 130, 45));
+    items.forEach(s => drawShaderFrame(s.ctx, s.cv.width, s.cv.height, s.mode, accentHex, t, s.motes, 145, 48));
     drawerShaderRAF = requestAnimationFrame(tick);
   }
   drawerShaderRAF = requestAnimationFrame(tick);
 }
 
 function renderDrawerCardsOnly() {
-  const headEl = document.getElementById('st-drawer-cat-head');
   const cardsEl = document.getElementById('st-drawer-cards');
   const hiddenBar = document.getElementById('st-hidden-secs-bar');
   if (!cardsEl) return;
 
   const q = state.drawerQuery.trim().toLowerCase();
-  const activeMeta = CATEGORIES.find(c => c.key === state.activeCat) || CATEGORIES[0];
-
   const entries = [];
+
   if (q) {
     CATEGORIES.forEach(c => {
       (VAULT[c.key] || []).forEach(item => {
@@ -649,44 +770,44 @@ function renderDrawerCardsOnly() {
         if (hay.includes(q)) entries.push({ cat: c, item });
       });
     });
+  } else if (state.trayGroup === 'sections' && state.activeCat === 'featured') {
+    FEATURED_SECTION_PICKS.forEach(([ck, id]) => {
+      const cat = CATEGORIES.find(c => c.key === ck);
+      const item = getAsset(ck, id);
+      if (cat && item) entries.push({ cat, item });
+    });
   } else {
+    const activeMeta = CATEGORIES.find(c => c.key === state.activeCat) || CATEGORIES.find(c => c.key === 'hero');
     (VAULT[activeMeta.key] || []).forEach(item => entries.push({ cat: activeMeta, item }));
   }
 
-  if (headEl) {
-    headEl.innerHTML = q
-      ? `<span>🔍 검색 결과 (${entries.length}개)</span><button type="button" onclick="setDrawerSearch('');document.getElementById('drawer-search-input').value='';" style="background:transparent;border:none;color:#FFF;font-size:11px;cursor:pointer;font-weight:700;">초기화 ✕</button>`
-      : `<span>${activeMeta.icon} ${activeMeta.shortName} (${entries.length}종)</span><span>⠿ 오른쪽으로 드래그!</span>`;
-  }
+  const use2Col = !q && (state.activeCat === 'button' || state.activeCat === 'badge');
+  cardsEl.classList.toggle('is-grid-2', use2Col);
+
+  const bleedCats = new Set(['palette', 'shader', 'font', 'textfx', 'surface', 'imgstyle', 'cursor', 'motion', 'preloader', 'widget', ...TRAY_GROUPS.sections]);
 
   cardsEl.innerHTML = entries.length ? entries.map(({ cat, item }) => {
     const isEq = state.equipped[cat.key] === item.id && (cat.group !== 'section' || state.secEnabled[cat.key]);
-    return `<div class="st-drag-card ${isEq ? 'is-equipped' : ''}" data-cat="${cat.key}" data-id="${item.id}">
-      <div class="st-drag-card-head">
-        <div class="st-drag-grip" title="${item.name}">
-          <span class="st-drag-grip-dots">⠿</span>
-          <span>${q ? `[${cat.shortName}] ` : ''}${item.name}</span>
-        </div>
-        <div style="display:flex;align-items:center;gap:4px;flex-shrink:0;">
-          <button type="button" class="st-no-drag" onclick="event.stopPropagation();openSingleAssetCode('${cat.key}','${item.id}')" style="background:rgba(255,255,255,0.08);border:none;color:#CBD5E1;font-family:'JetBrains Mono',monospace;font-size:10.5px;padding:2px 6px;border-radius:4px;cursor:pointer;" title="이 요소만 단독 코드 보기">&lt;/&gt;</button>
-          <span style="font-size:10.5px;padding:2px 7px;border-radius:999px;font-weight:800;background:${isEq ? '#38BDF8' : 'rgba(255,255,255,0.08)'};color:${isEq ? '#04131D' : '#94A3B8'};">${isEq ? '✓ 적용중' : '끌어서 놓기'}</span>
-        </div>
+    const isBleed = bleedCats.has(cat.key);
+    return `<div class="st-drag-card ${isEq ? 'is-equipped' : ''}" data-cat="${cat.key}" data-id="${item.id}" title="${item.name}">
+      <div class="st-thumb-corner">
+        <button type="button" class="st-thumb-code st-no-drag" onclick="event.stopPropagation();openSingleAssetCode('${cat.key}','${item.id}')" title="코드 보기">&lt;/&gt;</button>
+        ${isEq ? `<span class="st-thumb-check">✓</span>` : ''}
       </div>
-      <div class="st-drawer-stage">
+      <div class="st-drawer-stage ${isBleed ? 'is-bleed' : ''}">
         ${renderDrawerVisualStage(cat.key, item)}
       </div>
     </div>`;
-  }).join('') : `<div style="padding:36px 14px;text-align:center;color:#94A3B8;font-size:12.5px;">일치하는 디자인 요소가 없습니다.</div>`;
+  }).join('') : `<div style="padding:32px 12px;text-align:center;color:#94A3B8;font-size:12px;">검색 결과 없음</div>`;
 
   if (hiddenBar) {
     const hiddenKeys = state.secOrder.filter(k => !state.secEnabled[k]);
     if (hiddenKeys.length > 0) {
       hiddenBar.style.display = 'flex';
-      hiddenBar.innerHTML = `<span style="font-size:11px;color:#94A3B8;font-weight:700;width:100%;">숨긴 섹션 다시 넣기:</span>` +
-        hiddenKeys.map(k => {
-          const m = CATEGORIES.find(c => c.key === k);
-          return `<button type="button" onclick="restoreHiddenSection('${k}')" class="st-pill-btn" style="padding:3px 8px;font-size:11px;">+ ${m.icon} ${m.shortName}</button>`;
-        }).join('');
+      hiddenBar.innerHTML = hiddenKeys.map(k => {
+        const m = CATEGORIES.find(c => c.key === k);
+        return `<button type="button" onclick="restoreHiddenSection('${k}')" class="st-pill-btn" style="padding:3px 8px;font-size:11px;">+ ${m.icon} ${m.shortName}</button>`;
+      }).join('');
     } else {
       hiddenBar.style.display = 'none';
     }
@@ -697,31 +818,232 @@ function renderDrawerCardsOnly() {
 
 function renderSidebarBody() {
   const railEl = document.getElementById('st-cat-rail');
-  if (railEl) {
-    const globalCats = CATEGORIES.filter(c => c.group === 'global');
-    const secCats = CATEGORIES.filter(c => c.group === 'section');
-    railEl.innerHTML = `
-      <div class="st-rail-group-lbl">스타일·부품</div>
-      ${globalCats.map(c => `
-        <button type="button" onclick="selectSlotCategory('${c.key}')" class="st-rail-btn ${state.activeCat === c.key && !state.drawerQuery ? 'is-active' : ''}" title="${c.name}">
-          <span class="st-rail-ico">${c.icon}</span>
-          <span>${c.shortName}</span>
-        </button>
-      `).join('')}
-      <div class="st-rail-group-lbl" style="margin-top:8px;">페이지 섹션</div>
-      ${secCats.map(c => `
-        <button type="button" onclick="selectSlotCategory('${c.key}')" class="st-rail-btn ${state.activeCat === c.key && !state.drawerQuery ? 'is-active' : ''}" style="opacity:${state.secEnabled[c.key] ? '1' : '0.45'};" title="${c.name}">
-          <span class="st-rail-ico">${c.icon}</span>
-          <span>${c.shortName}</span>
-        </button>
-      `).join('')}
-    `;
-  }
+  const headEl = document.getElementById('st-drawer-cat-head');
+
+  ['sections', 'components', 'themes'].forEach(g => {
+    document.getElementById(`tray-tab-${g}`)?.classList.toggle('is-active', state.trayGroup === g);
+  });
+
+  const groupKeys = TRAY_GROUPS[state.trayGroup] || TRAY_GROUPS.sections;
+  const chipsHTML = (state.trayGroup === 'sections'
+    ? `<button type="button" onclick="selectSlotCategory('featured')" class="st-tray-chip ${state.activeCat === 'featured' && !state.drawerQuery ? 'is-active' : ''}">★ 인기 UI</button>`
+    : '') + groupKeys.map(k => {
+      const c = CATEGORIES.find(x => x.key === k);
+      if (!c) return '';
+      return `<button type="button" onclick="selectSlotCategory('${c.key}')" class="st-tray-chip ${state.activeCat === c.key && !state.drawerQuery ? 'is-active' : ''}">${c.icon} ${c.shortName}</button>`;
+    }).join('');
+
+  if (headEl) headEl.innerHTML = chipsHTML;
+  if (railEl) railEl.innerHTML = chipsHTML;
   renderDrawerCardsOnly();
 }
 
 /* ==========================================================================
-   60FPS POINTER DRAG & DROP ENGINE (Drawer -> Homepage + Section Reordering!)
+   DIRECT ON-CANVAS UI SELECTION, FREE X/Y MOVE, SCALE, DUPLICATE & DELETE
+   ========================================================================== */
+function getElementPathInRoot(el) {
+  const root = document.getElementById('hp-root');
+  if (!el || !root) return '';
+  const parts = [];
+  let cur = el;
+  while (cur && cur !== root && cur.parentElement) {
+    if (cur.id && cur.id.startsWith('sec-')) {
+      parts.unshift(`#${cur.id}`);
+      break;
+    }
+    const siblings = Array.from(cur.parentElement.children || []);
+    const idx = Math.max(0, siblings.indexOf(cur));
+    parts.unshift(`${cur.tagName.toLowerCase()}:nth-child(${idx + 1})`);
+    cur = cur.parentElement;
+  }
+  return parts.join('>');
+}
+
+function applyStoredUIOffsets() {
+  const root = document.getElementById('hp-root');
+  if (!root || typeof root.querySelector !== 'function') return;
+  Object.entries(state.uiOffsets || {}).forEach(([path, cfg]) => {
+    if (!path) return;
+    let el = null;
+    try { el = root.querySelector(path); } catch (_) {}
+    if (!el) return;
+    if (cfg.hidden) {
+      el.style.display = 'none';
+      return;
+    }
+    const x = cfg.x || 0;
+    const y = cfg.y || 0;
+    const sc = cfg.scale || 1;
+    if (x !== 0 || y !== 0 || sc !== 1) {
+      el.dataset.uiMoved = '1';
+      if (!el.style.position) el.style.position = 'relative';
+      el.style.zIndex = '24';
+      el.style.transform = `translate3d(${x}px, ${y}px, 0) scale(${sc})`;
+    }
+  });
+}
+
+function inferCategoryForCanvasElement(el) {
+  if (!el) return 'hero';
+  if (el.dataset?.freeCat) return el.dataset.freeCat;
+  if (el.classList?.contains('f-btn')) return 'button';
+  if (el.classList?.contains('f-bdg')) return 'badge';
+  if (el.classList?.contains('f-media')) return 'imgstyle';
+  if (el.classList?.contains('f-card')) return 'surface';
+  if (el.tagName === 'H1' || el.tagName === 'H2') return 'font';
+  const sec = el.closest?.('.f-sec-wrap');
+  return sec?.dataset?.secKey || 'hero';
+}
+
+let selectedCanvasEl = null;
+
+function syncSelectedUIOverlay() {
+  const box = document.getElementById('st-ui-sel-box');
+  const bar = document.getElementById('st-ui-toolbar');
+  if (!box || !bar) return;
+  if (!selectedCanvasEl || !selectedCanvasEl.isConnected) {
+    box.style.display = 'none';
+    bar.style.display = 'none';
+    return;
+  }
+  const r = selectedCanvasEl.getBoundingClientRect();
+  if (r.width < 2 && r.height < 2) {
+    box.style.display = 'none';
+    bar.style.display = 'none';
+    return;
+  }
+  box.style.display = 'block';
+  box.style.left = `${r.left - 4}px`;
+  box.style.top = `${r.top - 4}px`;
+  box.style.width = `${r.width + 8}px`;
+  box.style.height = `${r.height + 8}px`;
+
+  bar.style.display = 'inline-flex';
+  const barTop = r.top > 92 ? (r.top - 42) : (r.bottom + 10);
+  const barLeft = Math.max(12, Math.min((typeof window !== 'undefined' ? window.innerWidth - 220 : 800), r.left));
+  bar.style.top = `${barTop}px`;
+  bar.style.left = `${barLeft}px`;
+}
+
+function clearSelectedCanvasUI() {
+  selectedCanvasEl = null;
+  state.selectedUIPath = null;
+  state.selectedFreeUid = null;
+  const box = document.getElementById('st-ui-sel-box');
+  const bar = document.getElementById('st-ui-toolbar');
+  if (box) box.style.display = 'none';
+  if (bar) bar.style.display = 'none';
+}
+
+function selectCanvasUIElement(el) {
+  selectedCanvasEl = el;
+  if (!el) {
+    clearSelectedCanvasUI();
+    return;
+  }
+  if (el.classList?.contains('f-free-ui')) {
+    state.selectedFreeUid = el.dataset.uid;
+    state.selectedUIPath = null;
+  } else {
+    state.selectedFreeUid = null;
+    state.selectedUIPath = getElementPathInRoot(el);
+  }
+  syncSelectedUIOverlay();
+}
+
+function inspectSelectedUICategory() {
+  if (!selectedCanvasEl) return;
+  const catKey = inferCategoryForCanvasElement(selectedCanvasEl);
+  focusDrawerCategory(catKey);
+}
+
+function scaleSelectedUI(delta) {
+  if (!selectedCanvasEl) return;
+  pushUndoSnapshot();
+  if (state.selectedFreeUid) {
+    const fw = state.freeWidgets.find(x => x.uid === state.selectedFreeUid);
+    if (!fw) return;
+    fw.scale = Math.max(0.6, Math.min(1.85, Number(((fw.scale || 1) + delta).toFixed(2))));
+    selectedCanvasEl.style.transform = `scale(${fw.scale})`;
+  } else if (state.selectedUIPath) {
+    const cur = state.uiOffsets[state.selectedUIPath] || { x: 0, y: 0, scale: 1 };
+    const nextScale = Math.max(0.6, Math.min(1.85, Number(((cur.scale || 1) + delta).toFixed(2))));
+    state.uiOffsets[state.selectedUIPath] = { ...cur, scale: nextScale };
+    selectedCanvasEl.dataset.uiMoved = '1';
+    selectedCanvasEl.style.transform = `translate3d(${cur.x || 0}px, ${cur.y || 0}px, 0) scale(${nextScale})`;
+  }
+  syncSelectedUIOverlay();
+}
+
+function duplicateSelectedUI() {
+  if (!selectedCanvasEl) return;
+  const secWrap = selectedCanvasEl.closest?.('.f-sec-wrap');
+  if (!secWrap) return;
+  pushUndoSnapshot();
+  const sr = secWrap.getBoundingClientRect();
+  const er = selectedCanvasEl.getBoundingClientRect();
+  const xPct = Math.max(2, Math.min(86, ((er.left - sr.left + 22) / Math.max(1, sr.width)) * 100));
+  const yPx = Math.max(8, Math.round(er.top - sr.top + 22));
+  const cloneEl = selectedCanvasEl.cloneNode(true);
+  cloneEl.removeAttribute('id');
+  cloneEl.style.position = '';
+  cloneEl.style.left = '';
+  cloneEl.style.top = '';
+  cloneEl.style.transform = '';
+  const uid = 'fw-' + Date.now() + '-' + Math.floor(Math.random() * 999);
+  state.freeWidgets.push({
+    uid,
+    secKey: secWrap.dataset.secKey,
+    catKey: inferCategoryForCanvasElement(selectedCanvasEl),
+    assetId: '',
+    customHTML: cloneEl.outerHTML,
+    xPct,
+    yPx,
+    scale: 1
+  });
+  renderLiveWebsite();
+  setTimeout(() => {
+    const mounted = document.querySelector(`.f-free-ui[data-uid="${uid}"]`);
+    if (mounted) selectCanvasUIElement(mounted);
+  }, 20);
+}
+
+function resetSelectedUIPosition() {
+  if (!selectedCanvasEl) return;
+  pushUndoSnapshot();
+  if (state.selectedFreeUid) {
+    const fw = state.freeWidgets.find(x => x.uid === state.selectedFreeUid);
+    if (fw) { fw.scale = 1; }
+    renderLiveWebsite();
+    return;
+  }
+  if (state.selectedUIPath && state.uiOffsets[state.selectedUIPath]) {
+    delete state.uiOffsets[state.selectedUIPath];
+    delete selectedCanvasEl.dataset.uiMoved;
+    selectedCanvasEl.style.transform = '';
+    selectedCanvasEl.style.zIndex = '';
+  }
+  syncSelectedUIOverlay();
+}
+
+function deleteSelectedUI() {
+  if (!selectedCanvasEl) return;
+  pushUndoSnapshot();
+  if (state.selectedFreeUid) {
+    state.freeWidgets = state.freeWidgets.filter(x => x.uid !== state.selectedFreeUid);
+    clearSelectedCanvasUI();
+    renderLiveWebsite();
+    return;
+  }
+  if (state.selectedUIPath) {
+    state.uiOffsets[state.selectedUIPath] = { ...(state.uiOffsets[state.selectedUIPath] || {}), hidden: true };
+    selectedCanvasEl.style.display = 'none';
+    clearSelectedCanvasUI();
+  }
+}
+
+/* ==========================================================================
+   60FPS LIVE UI CLONE DRAG & DROP + DIRECT ON-CANVAS UI DRAG ENGINE
    ========================================================================== */
 function getMatchingCanvasSelector(catKey) {
   if (catKey === 'button') return '#hp-root .f-btn';
@@ -753,6 +1075,7 @@ function clearAllDropHighlights() {
   if (line) line.style.display = 'none';
   document.querySelectorAll?.('.is-drop-target-el').forEach(el => el.classList.remove('is-drop-target-el'));
   document.querySelectorAll?.('.is-sec-replace-target').forEach(el => el.classList.remove('is-sec-replace-target'));
+  document.querySelectorAll?.('.is-being-dragged').forEach(el => el.classList.remove('is-being-dragged'));
 }
 
 function computeSectionDropTarget(clientY, draggedCatKey, isReorderOnly = false) {
@@ -767,7 +1090,7 @@ function computeSectionDropTarget(clientY, draggedCatKey, isReorderOnly = false)
     const sk = el.dataset.secKey;
     if (clientY >= r.top && clientY <= r.bottom) {
       const rel = (clientY - r.top) / Math.max(1, r.height);
-      if (!isReorderOnly && sk === draggedCatKey && rel > 0.18 && rel < 0.82) {
+      if (!isReorderOnly && sk === draggedCatKey && rel > 0.2 && rel < 0.8) {
         return { mode: 'replace', el, refSecKey: sk };
       }
       const pos = rel < 0.5 ? 'before' : 'after';
@@ -795,23 +1118,41 @@ function placeKeyRelative(orderArr, movingKey, refKey, pos) {
   return clean;
 }
 
+function mountLiveVisualGhost(catKey, item) {
+  const ghost = document.getElementById('st-drag-ghost');
+  if (!ghost) return;
+  const pal = getAsset('palette', state.equipped.palette);
+  const fnt = getAsset('font', state.equipped.font);
+  const srf = getAsset('surface', state.equipped.surface);
+  const imgst = getAsset('imgstyle', state.equipped.imgstyle);
+  ghost.className = `st-drag-ghost f-site ${pal.cls} ${fnt.cls} ${srf.cls} ${imgst.cls}`;
+  ghost.innerHTML = renderDrawerVisualStage(catKey, item);
+}
+
 let activePointerDrag = null;
+let activeCanvasUIDrag = null;
 
 function startSectionReorderDrag(ev, secKey) {
   if (ev.button && ev.button !== 0) return;
   ev.preventDefault();
   ev.stopPropagation();
+  clearSelectedCanvasUI();
   const meta = CATEGORIES.find(c => c.key === secKey);
   const eq = getAsset(secKey, state.equipped[secKey]);
+  mountLiveVisualGhost(secKey, eq);
+  const secEl = document.getElementById('sec-' + secKey);
+  if (secEl) secEl.style.opacity = '0.4';
   activePointerDrag = {
     kind: 'reorder',
     catKey: secKey,
     assetId: eq.id,
     meta,
     item: eq,
+    secEl,
     startX: ev.clientX,
     startY: ev.clientY,
     moved: false,
+    ghostMounted: true,
     secTarget: null
   };
 }
@@ -819,6 +1160,12 @@ function startSectionReorderDrag(ev, secKey) {
 function initDragAndDropSystem() {
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
 
+  const frame = document.getElementById('canvas-frame');
+  if (frame && typeof frame.addEventListener === 'function') {
+    frame.addEventListener('scroll', syncSelectedUIOverlay);
+  }
+
+  // 1. Left Visual UI Tray -> Drag Actual UI Clone onto Live Webpage!
   const drawerCards = document.getElementById('st-drawer-cards');
   if (drawerCards) {
     drawerCards.addEventListener('dragstart', (e) => e.preventDefault());
@@ -835,6 +1182,7 @@ function initDragAndDropSystem() {
 
       activePointerDrag = {
         kind: 'asset',
+        cardEl: card,
         catKey,
         assetId,
         origAssetId: state.equipped[catKey],
@@ -843,16 +1191,118 @@ function initDragAndDropSystem() {
         pointerType: e.pointerType || 'mouse',
         startX: e.clientX,
         startY: e.clientY,
+        lastX: e.clientX,
+        lastY: e.clientY,
         moved: false,
+        ghostMounted: false,
         overCanvas: false,
         secTarget: null
       };
     });
   }
 
+  // 2. Direct On-Canvas UI Manipulation: Grab & Move ANY UI Element right on the Webpage!
+  const mount = document.getElementById('website-mount');
+  if (mount) {
+    mount.addEventListener('dragstart', (e) => e.preventDefault());
+    mount.addEventListener('pointerdown', (e) => {
+      if (!state.canvasMoveMode || state.inlineEdit || state.presentation) return;
+      if (e.button && e.button !== 0) return;
+      if (e.target.closest?.('.f-sec-pill')) return;
+
+      const movable = e.target.closest?.('.f-free-ui, .f-btn, .f-bdg, .f-media, h1, h2, h3, .f-lead, .f-card');
+      if (!movable) {
+        clearSelectedCanvasUI();
+        return;
+      }
+
+      // Prevent native button clicks / text selection while moving UI directly
+      e.preventDefault();
+      selectCanvasUIElement(movable);
+
+      const isFree = movable.classList?.contains('f-free-ui');
+      if (isFree) {
+        const fw = state.freeWidgets.find(x => x.uid === movable.dataset.uid);
+        const secWrap = movable.closest?.('.f-sec-wrap');
+        if (!fw || !secWrap) return;
+        activeCanvasUIDrag = {
+          el: movable,
+          isFree: true,
+          fw,
+          secRect: secWrap.getBoundingClientRect(),
+          startX: e.clientX,
+          startY: e.clientY,
+          origXPct: fw.xPct,
+          origYPx: fw.yPx,
+          moved: false
+        };
+      } else {
+        const pathKey = getElementPathInRoot(movable);
+        const prev = state.uiOffsets[pathKey] || { x: 0, y: 0, scale: 1 };
+        activeCanvasUIDrag = {
+          el: movable,
+          isFree: false,
+          pathKey,
+          startX: e.clientX,
+          startY: e.clientY,
+          origX: prev.x || 0,
+          origY: prev.y || 0,
+          scale: prev.scale || 1,
+          moved: false
+        };
+      }
+    });
+
+    // Block accidental button onclick execution right after dragging a UI element on canvas
+    mount.addEventListener('click', (e) => {
+      if (state.canvasMoveMode && !state.inlineEdit && !state.presentation) {
+        if (e.target.closest?.('.f-sec-pill')) return;
+        if (mount._suppressClickUntil && Date.now() < mount._suppressClickUntil) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+      }
+    }, true);
+  }
+
   window.addEventListener('pointermove', (e) => {
+    // A. Moving an On-Canvas UI Element Directly!
+    if (activeCanvasUIDrag) {
+      const cd = activeCanvasUIDrag;
+      const dx = e.clientX - cd.startX;
+      const dy = e.clientY - cd.startY;
+      if (!cd.moved) {
+        if (Math.hypot(dx, dy) < 3) return;
+        cd.moved = true;
+        pushUndoSnapshot();
+        document.body.classList.add('is-dragging');
+      }
+      if (cd.isFree) {
+        const sw = Math.max(1, cd.secRect.width);
+        cd.fw.xPct = Math.max(0, Math.min(92, cd.origXPct + (dx / sw) * 100));
+        cd.fw.yPx = Math.max(0, Math.round(cd.origYPx + dy));
+        cd.el.style.left = `${cd.fw.xPct}%`;
+        cd.el.style.top = `${cd.fw.yPx}px`;
+      } else {
+        let nx = Math.round(cd.origX + dx);
+        let ny = Math.round(cd.origY + dy);
+        if (Math.abs(nx) < 5) nx = 0;
+        if (Math.abs(ny) < 5) ny = 0;
+        state.uiOffsets[cd.pathKey] = { x: nx, y: ny, scale: cd.scale };
+        cd.el.dataset.uiMoved = '1';
+        if (!cd.el.style.position) cd.el.style.position = 'relative';
+        cd.el.style.zIndex = '25';
+        cd.el.style.transform = `translate3d(${nx}px, ${ny}px, 0) scale(${cd.scale})`;
+      }
+      syncSelectedUIOverlay();
+      return;
+    }
+
+    // B. Dragging a Live Visual UI Thumbnail from Tray or Section Handle
     if (!activePointerDrag) return;
     const d = activePointerDrag;
+    d.lastX = e.clientX;
+    d.lastY = e.clientY;
     const dx = e.clientX - d.startX;
     const dy = e.clientY - d.startY;
 
@@ -863,7 +1313,13 @@ function initDragAndDropSystem() {
         return;
       }
       d.moved = true;
+      clearSelectedCanvasUI();
       document.body.classList.add('is-dragging');
+      if (d.cardEl) d.cardEl.classList.add('is-being-dragged');
+      if (!d.ghostMounted) {
+        mountLiveVisualGhost(d.catKey, d.item);
+        d.ghostMounted = true;
+      }
       if (d.kind === 'asset' && d.meta.group === 'global') {
         const sel = getMatchingCanvasSelector(d.catKey);
         if (sel) document.querySelectorAll(sel).forEach(el => el.classList.add('is-drop-target-el'));
@@ -871,42 +1327,31 @@ function initDragAndDropSystem() {
     }
 
     const ghost = document.getElementById('st-drag-ghost');
-    const frame = document.getElementById('canvas-frame');
-    const dropBanner = document.getElementById('st-drop-banner');
+    const cFrame = document.getElementById('canvas-frame');
     const dropLine = document.getElementById('st-sec-drop-line');
     const dropLineLbl = document.getElementById('st-sec-drop-label');
-    if (!frame) return;
+    if (!cFrame) return;
 
-    const fr = frame.getBoundingClientRect();
+    const fr = cFrame.getBoundingClientRect();
     const insideFrame = e.clientX >= fr.left && e.clientX <= fr.right && e.clientY >= fr.top && e.clientY <= fr.bottom;
     d.overCanvas = insideFrame;
 
-    // Smooth auto-scroll when dragging near top or bottom of canvas!
     if (insideFrame) {
-      if (e.clientY < fr.top + 64) frame.scrollTop -= 11;
-      else if (e.clientY > fr.bottom - 64) frame.scrollTop += 11;
+      if (e.clientY < fr.top + 64) cFrame.scrollTop -= 12;
+      else if (e.clientY > fr.bottom - 64) cFrame.scrollTop += 12;
     }
 
     if (ghost) {
       ghost.style.display = 'flex';
-      ghost.style.transform = `translate3d(${e.clientX + 14}px, ${e.clientY + 14}px, 0) rotate(-1.5deg)`;
+      ghost.style.transform = `translate3d(${e.clientX - 40}px, ${e.clientY - 24}px, 0) scale(0.96)`;
       ghost.classList.toggle('is-ready', insideFrame);
-      const statusTxt = d.kind === 'reorder'
-        ? (insideFrame ? '↕ 원하는 위치에서 마우스를 놓으세요!' : '캔버스 안에서 위아래로 이동하세요')
-        : (insideFrame ? '🎯 여기서 손 떼면 바로 적용!' : '👉 오른쪽 홈페이지 위로 끌어다 놓으세요');
-      ghost.innerHTML = `
-        <span class="st-drag-ghost-status">${statusTxt}</span>
-        <div style="font-size:13px;font-weight:800;color:#F8FAFC;">${d.meta.icon} ${d.item.name}</div>
-        <div style="font-size:11px;color:#94A3B8;">${d.meta.shortName}</div>
-      `;
     }
 
-    // Highlight logic on Homepage
     document.querySelectorAll?.('.is-sec-replace-target').forEach(el => el.classList.remove('is-sec-replace-target'));
     if (dropLine) dropLine.style.display = 'none';
 
     if (!insideFrame) {
-      frame.classList.remove('is-drop-hot');
+      cFrame.classList.remove('is-drop-hot');
       if (d.kind === 'asset' && d.meta.group === 'global') {
         previewGlobalClassOnRoot(d.catKey, d.origAssetId);
       }
@@ -915,49 +1360,58 @@ function initDragAndDropSystem() {
     }
 
     if (d.kind === 'reorder') {
+      cFrame.classList.add('is-drop-hot');
       const st = computeSectionDropTarget(e.clientY, d.catKey, true);
       d.secTarget = st;
-      if (st && dropLine && dropLineLbl) {
+      if (st && dropLine) {
         dropLine.style.display = 'flex';
-        dropLine.style.top = `${Math.max(fr.top + 6, Math.min(fr.bottom - 6, st.lineY))}px`;
+        dropLine.style.top = `${Math.max(fr.top + 24, Math.min(fr.bottom - 24, st.lineY))}px`;
         dropLine.style.left = `${fr.left + 20}px`;
         dropLine.style.width = `${fr.width - 40}px`;
-        dropLineLbl.textContent = `↕ 여기에 [${d.meta.icon} ${d.meta.shortName}] 섹션 이동`;
+        if (dropLineLbl) dropLineLbl.textContent = '+';
       }
     } else if (d.meta.group === 'global') {
-      frame.classList.add('is-drop-hot');
-      if (dropBanner) dropBanner.textContent = `✨ 손 떼면 [${d.meta.icon} ${d.meta.shortName}: ${d.item.name}] 즉시 적용!`;
+      cFrame.classList.add('is-drop-hot');
       previewGlobalClassOnRoot(d.catKey, d.assetId);
     } else {
-      frame.classList.add('is-drop-hot');
+      cFrame.classList.add('is-drop-hot');
       const st = computeSectionDropTarget(e.clientY, d.catKey, false);
       d.secTarget = st;
       if (st?.mode === 'replace' && st.el) {
-        if (dropBanner) dropBanner.textContent = `🔄 손 떼면 [${d.meta.shortName}] 디자인이 "${d.item.name}"(으)로 교체됩니다!`;
-        st.el.dataset.dropLabel = `🔄 놓으면 [${d.item.name}] 디자인으로 교체!`;
         st.el.classList.add('is-sec-replace-target');
-      } else if (st && dropLine && dropLineLbl) {
-        if (dropBanner) dropBanner.textContent = `➕ 손 떼면 선택한 위치에 [${d.meta.shortName}: ${d.item.name}] 배치!`;
+      } else if (st && dropLine) {
         dropLine.style.display = 'flex';
-        dropLine.style.top = `${Math.max(fr.top + 6, Math.min(fr.bottom - 6, st.lineY))}px`;
+        dropLine.style.top = `${Math.max(fr.top + 24, Math.min(fr.bottom - 24, st.lineY))}px`;
         dropLine.style.left = `${fr.left + 20}px`;
         dropLine.style.width = `${fr.width - 40}px`;
-        dropLineLbl.textContent = `➕ 여기에 [${d.meta.icon} ${d.meta.shortName}: ${d.item.name}] 배치하기`;
+        if (dropLineLbl) dropLineLbl.textContent = '+';
       }
     }
   });
 
-  const finishPointerDrag = () => {
+  const finishPointerDrag = (ev) => {
+    if (activeCanvasUIDrag) {
+      const cd = activeCanvasUIDrag;
+      activeCanvasUIDrag = null;
+      document.body.classList.remove('is-dragging');
+      if (cd.moved && mount) {
+        mount._suppressClickUntil = Date.now() + 180;
+      }
+      syncSelectedUIOverlay();
+      return;
+    }
+
     if (!activePointerDrag) return;
     const d = activePointerDrag;
     activePointerDrag = null;
 
     document.body.classList.remove('is-dragging');
+    if (d.secEl) d.secEl.style.opacity = '';
     const ghost = document.getElementById('st-drag-ghost');
     if (ghost) ghost.style.display = 'none';
     clearAllDropHighlights();
 
-    // Simple click without dragging -> also equip immediately!
+    // Simple click in Left Tray -> apply immediately!
     if (!d.moved) {
       if (d.kind === 'asset') {
         pushUndoSnapshot();
@@ -984,17 +1438,54 @@ function initDragAndDropSystem() {
           movedEl?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
           movedEl?.classList.add('is-just-applied');
         }, 40);
-        showStudioToast(`↕ [${d.meta.shortName}] 섹션 위치를 이동했습니다!`);
       }
       return;
     }
 
-    // Restore original before taking Undo snapshot!
     if (d.meta.group === 'global') {
       previewGlobalClassOnRoot(d.catKey, d.origAssetId);
     }
-    pushUndoSnapshot();
 
+    // Check if user dropped a standalone Component UI onto open space inside a section to place a freely-movable UI widget!
+    const placeableComp = ['button', 'surface', 'inputui', 'imgstyle', 'badge'].includes(d.catKey);
+    const dropX = ev?.clientX ?? d.lastX;
+    const dropY = ev?.clientY ?? d.lastY;
+    if (placeableComp && typeof document.elementFromPoint === 'function') {
+      const hitEl = document.elementFromPoint(dropX, dropY);
+      const matchSel = d.catKey === 'button' ? '.f-btn'
+        : d.catKey === 'surface' ? '.f-card'
+        : d.catKey === 'imgstyle' ? '.f-media'
+        : d.catKey === 'badge' ? '.f-bdg'
+        : '.f-input, .f-switch';
+      const hitExistingMatch = hitEl?.closest?.(matchSel);
+      const hitSecWrap = hitEl?.closest?.('.f-sec-wrap');
+
+      if (!hitExistingMatch && hitSecWrap) {
+        pushUndoSnapshot();
+        const sr = hitSecWrap.getBoundingClientRect();
+        const xPct = Math.max(2, Math.min(84, ((dropX - sr.left - 36) / Math.max(1, sr.width)) * 100));
+        const yPx = Math.max(8, Math.round(dropY - sr.top - 18));
+        const uid = 'fw-' + Date.now() + '-' + Math.floor(Math.random() * 999);
+        state.freeWidgets.push({
+          uid,
+          secKey: hitSecWrap.dataset.secKey,
+          catKey: d.catKey,
+          assetId: d.assetId,
+          customHTML: null,
+          xPct,
+          yPx,
+          scale: 1
+        });
+        renderLiveWebsite();
+        setTimeout(() => {
+          const placed = document.querySelector(`.f-free-ui[data-uid="${uid}"]`);
+          if (placed) selectCanvasUIElement(placed);
+        }, 25);
+        return;
+      }
+    }
+
+    pushUndoSnapshot();
     if (d.meta.group === 'section') {
       state.secEnabled[d.catKey] = true;
       if (d.secTarget?.mode === 'insert' && d.secTarget.refSecKey && d.secTarget.refSecKey !== d.catKey) {
@@ -1006,36 +1497,20 @@ function initDragAndDropSystem() {
 
   window.addEventListener('pointerup', finishPointerDrag);
   window.addEventListener('pointercancel', finishPointerDrag);
-
-  // Smart Click-on-Homepage Sync: clicking a generic CTA button or badge opens its category in Left Drawer!
-  document.getElementById('website-mount')?.addEventListener('click', (e) => {
-    if (state.inlineEdit || state.presentation) return;
-    if (e.target.closest?.('.f-sec-pill')) return;
-    const btnEl = e.target.closest?.('.f-btn');
-    if (btnEl && !btnEl.getAttribute('onclick')) {
-      focusDrawerCategory('button');
-      return;
-    }
-    const bdgEl = e.target.closest?.('.f-bdg');
-    if (bdgEl && !bdgEl.getAttribute('onclick')) {
-      focusDrawerCategory('badge');
-    }
-  });
 }
 
 /* ==========================================================================
    RENDER FULL LIVE WEBSITE + PRELOADER / SCROLL LASER / INTRO CURTAIN
    ========================================================================== */
 function makeSectionHoverPill(secKey) {
-  const meta = CATEGORIES.find(c => c.key === secKey);
   const eq = getAsset(secKey, state.equipped[secKey]);
   return `<div class="f-sec-pill" contenteditable="false">
-    <button type="button" onpointerdown="startSectionReorderDrag(event, '${secKey}')" style="cursor:grab;background:rgba(56,189,248,0.22);color:#BAE6FD;" title="마우스로 잡고 위아래로 끌어서 섹션 순서 변경">⠿ 끌어서 이동</button>
-    <button type="button" onclick="focusDrawerCategory('${secKey}')" title="왼쪽 서랍에서 이 섹션의 다른 디자인 보기">${meta.icon} ${meta.shortName} 바꾸기</button>
-    <button type="button" onclick="pushUndoSnapshot();cycleSlot('${secKey}', -1, event)" title="이전 디자인">‹</button>
-    <button type="button" onclick="pushUndoSnapshot();cycleSlot('${secKey}', 1, event)" title="다음 디자인">›</button>
-    <button type="button" onclick="openSingleAssetCode('${secKey}', '${eq.id}')" title="이 섹션 코드만 보기">&lt;/&gt;</button>
-    <button type="button" onclick="hideSectionWithUndo('${secKey}')" style="background:rgba(239,68,68,0.22);color:#FCA5A5;" title="이 섹션 숨기기">✕</button>
+    <button type="button" onpointerdown="startSectionReorderDrag(event, '${secKey}')" style="cursor:grab;background:rgba(56,189,248,0.28);color:#E0F2FE;" title="잡고 끌어서 섹션 이동">⠿</button>
+    <button type="button" onclick="moveSectionOrder('${secKey}', -1)" title="위로">↑</button>
+    <button type="button" onclick="moveSectionOrder('${secKey}', 1)" title="아래로">↓</button>
+    <button type="button" onclick="focusDrawerCategory('${secKey}')" title="이 섹션 다른 UI 보기">🎨</button>
+    <button type="button" onclick="openSingleAssetCode('${secKey}', '${eq.id}')" title="코드">&lt;/&gt;</button>
+    <button type="button" onclick="hideSectionWithUndo('${secKey}')" style="background:rgba(239,68,68,0.25);color:#FCA5A5;" title="섹션 숨기기">✕</button>
   </div>`;
 }
 
@@ -1143,9 +1618,16 @@ function renderLiveWebsite() {
       const mod = getAsset(secKey, state.equipped[secKey]);
       const html = mod.render(w, ctx);
       if (!html) return '';
+      const secFreeWidgets = state.freeWidgets
+        .filter(fw => fw.secKey === secKey)
+        .map(fw => {
+          const inner = fw.customHTML || renderFreeComponentHTML(fw.catKey, getAsset(fw.catKey, fw.assetId));
+          return `<div class="f-free-ui" data-uid="${fw.uid}" data-free-cat="${fw.catKey}" style="left:${fw.xPct}%;top:${fw.yPx}px;transform:scale(${fw.scale || 1});transform-origin:top left;">${inner}</div>`;
+        }).join('');
       return `<div id="sec-${secKey}" data-sec-key="${secKey}" class="f-sec-wrap">
         ${makeSectionHoverPill(secKey)}
         ${html}
+        ${secFreeWidgets}
       </div>`;
     }).join('\n');
 
@@ -1153,7 +1635,7 @@ function renderLiveWebsite() {
   if (!mount) return;
 
   mount.innerHTML = `
-    <div id="hp-root" class="f-site ${pal.cls} ${shd.cls || ''} ${fnt.cls} ${tfx.cls} ${srf.cls} ${imgst.cls} ${inp.cls || ''} ${mot.cls} ${state.guidesOn ? 'guides-on' : ''} ${state.inlineEdit ? 'is-editing' : ''}" style="${tokenStyle}">
+    <div id="hp-root" class="f-site ${pal.cls} ${shd.cls || ''} ${fnt.cls} ${tfx.cls} ${srf.cls} ${imgst.cls} ${inp.cls || ''} ${mot.cls} ${state.guidesOn ? 'guides-on' : ''} ${state.canvasMoveMode && !state.inlineEdit ? 'is-move-mode' : ''} ${state.inlineEdit ? 'is-editing' : ''}" style="${tokenStyle}">
       ${renderPreloaderChrome(pre)}
       <canvas id="hp-shader-canvas" class="f-shader-layer"></canvas>
       <div class="f-grain-overlay"></div>
@@ -1167,6 +1649,7 @@ function renderLiveWebsite() {
     </div>
   `;
 
+  applyStoredUIOffsets();
   initShaderEngine(shd.mode);
   bindLivePhysics();
   initScrollChoreography();
@@ -1601,13 +2084,17 @@ function bindLivePhysics() {
       const y = e.clientY - r.top;
       btn.style.setProperty('--mx', `${x}px`);
       btn.style.setProperty('--my', `${y}px`);
+      if (btn.dataset.uiMoved === '1' || state.canvasMoveMode) return;
       if (btn.classList.contains('f-magnetic') || state.equipped.button === 'BTN-01') {
         const tx = (x - r.width / 2) * 0.26;
         const ty = (y - r.height / 2) * 0.32;
         btn.style.transform = `translate(${tx.toFixed(1)}px, ${ty.toFixed(1)}px)`;
       }
     });
-    btn.addEventListener('mouseleave', () => { btn.style.transform = ''; });
+    btn.addEventListener('mouseleave', () => {
+      if (btn.dataset.uiMoved === '1' || state.canvasMoveMode) return;
+      btn.style.transform = '';
+    });
   });
 
   const cards = root.querySelectorAll('.f-card');
@@ -1640,12 +2127,16 @@ function bindLivePhysics() {
   if (state.equipped.surface === 'SRF-02') {
     cards.forEach(card => {
       card.addEventListener('mousemove', (e) => {
+        if (card.dataset.uiMoved === '1' || state.canvasMoveMode) return;
         const r = card.getBoundingClientRect();
         const rx = (((e.clientY - r.top) / r.height) - 0.5) * -9;
         const ry = (((e.clientX - r.left) / r.width) - 0.5) * 9;
         card.style.transform = `perspective(900px) rotateX(${rx.toFixed(2)}deg) rotateY(${ry.toFixed(2)}deg) translateY(-4px)`;
       });
-      card.addEventListener('mouseleave', () => { card.style.transform = ''; });
+      card.addEventListener('mouseleave', () => {
+        if (card.dataset.uiMoved === '1' || state.canvasMoveMode) return;
+        card.style.transform = '';
+      });
     });
   }
 
@@ -2476,9 +2967,9 @@ function openFullWebsiteExport() {
   const clone = root.cloneNode(true);
   clone.querySelectorAll('.f-sec-pill, #floating-work-preview, #hp-live-curtain').forEach(el => el.remove());
   clone.querySelectorAll('.is-waiting').forEach(el => el.classList.remove('is-waiting'));
-  clone.classList.remove('guides-on', 'is-editing');
+  clone.classList.remove('guides-on', 'is-editing', 'is-move-mode');
 
-  const liveCloneHTML = clone.outerHTML;
+  const liveCloneHTML = clone.outerHTML.replace(/\b(guides-on|is-editing|is-move-mode)\b/g, '');
   const cleanHTML = liveCloneHTML.replace(/data:image\/webp;base64,[^"]+/g, 'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=1400&q=80');
   const summary = CATEGORIES.map(c => `${c.key}:${state.equipped[c.key]}`).join(' | ');
 
@@ -2498,11 +2989,15 @@ function openFullWebsiteExport() {
         const r = btn.getBoundingClientRect();
         btn.style.setProperty('--mx', (e.clientX - r.left) + 'px');
         btn.style.setProperty('--my', (e.clientY - r.top) + 'px');
+        if (btn.dataset.uiMoved === '1') return;
         if (btn.classList.contains('f-magnetic')) {
           btn.style.transform = 'translate(' + ((e.clientX - r.left - r.width/2)*0.25).toFixed(1) + 'px,' + ((e.clientY - r.top - r.height/2)*0.3).toFixed(1) + 'px)';
         }
       });
-      btn.addEventListener('mouseleave', () => btn.style.transform = '');
+      btn.addEventListener('mouseleave', () => {
+        if (btn.dataset.uiMoved === '1') return;
+        btn.style.transform = '';
+      });
     });
     document.addEventListener('mousemove', e => {
       document.querySelectorAll('.f-card').forEach(c => {
@@ -2519,7 +3014,7 @@ function openFullWebsiteExport() {
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>${w.brand} — ${w.eyebrow}</title>
   <meta name="description" content="${w.h1Sub}" />
-  <!-- FORMA STUDIO v6 Assembled 26-Slot Combination: ${summary} -->
+  <!-- FORMA STUDIO v8 Assembled 26-Slot Combination: ${summary} -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=Cormorant+Garamond:ital,wght@0,400..700;1,400..700&family=Gowun+Batang:wght@400;700&family=Hahmlet:wght@700&family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=JetBrains+Mono:wght@400..700&family=Noto+Serif+KR:wght@300;600&family=Playfair+Display:ital,wght@0,400..800;1,400..800&family=Plus+Jakarta+Sans:wght@400..800&family=Space+Grotesk:wght@400..700&family=Syne:wght@600..800&display=swap" />
   <style>
@@ -2558,7 +3053,7 @@ function downloadExportHTML() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `${state.worldKey}-forma-v6.html`;
+  a.download = `${state.worldKey}-forma-v8.html`;
   a.click();
   URL.revokeObjectURL(url);
   showStudioToast('완성 홈페이지 HTML 파일 다운로드가 시작되었습니다.');
@@ -2570,10 +3065,14 @@ function downloadStudioSelfHTML() {
   [
     'website-mount', 'st-subbar', 'st-cat-rail', 'st-drawer-cat-head',
     'st-drawer-cards', 'st-hidden-secs-bar', 'st-tune-popover',
-    'vault-toolbar', 'vault-cats-bar', 'vault-cards-grid'
+    'vault-toolbar', 'vault-cats-bar', 'vault-cards-grid', 'st-drag-ghost'
   ].forEach(id => {
     const el = clone.querySelector ? clone.querySelector('#' + id) : null;
     if (el) el.innerHTML = '';
+  });
+  ['st-ui-sel-box', 'st-ui-toolbar', 'st-drag-ghost', 'st-sec-drop-line'].forEach(id => {
+    const el = clone.querySelector ? clone.querySelector('#' + id) : null;
+    if (el) el.style.display = 'none';
   });
   clone.querySelectorAll?.('.is-open, .is-visible, .is-drop-hot, .is-dragging').forEach(el => {
     el.classList.remove('is-open', 'is-visible', 'is-drop-hot', 'is-dragging');
@@ -2588,12 +3087,12 @@ function downloadStudioSelfHTML() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = 'FORMA_STUDIO_v7.html';
+  a.download = 'FORMA_STUDIO_v8.html';
   document.body.appendChild(a);
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
-  showStudioToast('FORMA_STUDIO_v7.html 다운로드 시작! 더블클릭하면 크롬 전체화면으로 바로 열립니다.');
+  showStudioToast('FORMA_STUDIO_v8.html 다운로드 시작! 더블클릭하면 크롬 전체화면으로 바로 열립니다.');
 }
 
 /* ==========================================================================
@@ -2617,12 +3116,12 @@ function syncStudioViewportHeight() {
 
 window.addEventListener('DOMContentLoaded', () => {
   syncStudioViewportHeight();
-  // Keep the visual drag drawer OPEN side-by-side next to the homepage on Desktop & Inline embeds (>= 660px)!
+  // Keep the pure visual UI tray OPEN side-by-side next to the live canvas on Desktop & Inline embeds (>= 660px)!
   if (typeof window !== 'undefined' && window.innerWidth < 660) {
     state.sidebarOpen = false;
     document.getElementById('st-sidebar')?.classList.add('is-collapsed');
     const btn = document.getElementById('sidebar-toggle-btn');
-    if (btn) btn.textContent = '◨ 요소창 열기';
+    if (btn) btn.textContent = '◨ UI패널';
   }
   window.addEventListener('resize', syncStudioViewportHeight);
 
@@ -2635,10 +3134,15 @@ window.addEventListener('DOMContentLoaded', () => {
 
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
+      clearSelectedCanvasUI();
       if (state.presentation) togglePresentationMode(false);
       if (state.tuneOpen) toggleTunePopover(false);
       document.getElementById('export-modal')?.classList.remove('is-open');
       document.getElementById('lightbox-modal')?.classList.remove('is-open');
+    }
+    if ((e.key === 'Delete' || e.key === 'Backspace') && !state.inlineEdit && selectedCanvasEl && !/INPUT|TEXTAREA|SELECT/.test(e.target?.tagName || '')) {
+      e.preventDefault();
+      deleteSelectedUI();
     }
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z' && !state.inlineEdit) {
       e.preventDefault();
