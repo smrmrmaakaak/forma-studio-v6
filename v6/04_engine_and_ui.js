@@ -77,6 +77,7 @@ const state = {
   tuneOpen: false,
   worldKey: 'maison',
   trayGroup: 'sections',    // 'sections' | 'components' | 'themes'
+  trayWide: false,          // 1-click 680px extra-large whole-section showcase toggle
   activeCat: 'featured',    // 'featured' | 'all' | specific catKey
   drawerQuery: '',
   vaultFilter: 'all',
@@ -332,11 +333,37 @@ function togglePresentationMode(force) {
   }
 }
 
+function syncDrawerSectionZoom() {
+  const sb = document.getElementById('st-sidebar');
+  const cardsEl = document.getElementById('st-drawer-cards');
+  if (!sb || !cardsEl || !state.sidebarOpen) return;
+  const rawW = cardsEl.clientWidth || sb.clientWidth || 0;
+  if (rawW > 180 && rawW < 920) {
+    const availW = Math.max(250, rawW - 28);
+    const z = (availW / 760).toFixed(4);
+    sb.style.setProperty('--sec-zoom', z);
+  }
+}
+
+function toggleTrayWide() {
+  state.trayWide = !state.trayWide;
+  const sb = document.getElementById('st-sidebar');
+  if (sb) sb.classList.toggle('is-wide', state.trayWide);
+  const wBtn = document.getElementById('tray-wide-btn');
+  if (wBtn) {
+    wBtn.classList.toggle('is-active', state.trayWide);
+    wBtn.textContent = state.trayWide ? '⇕ 기본크기' : '⇔ 더 크게';
+  }
+  syncDrawerSectionZoom();
+  setTimeout(syncDrawerSectionZoom, 260);
+}
+
 function toggleSidebar() {
   state.sidebarOpen = !state.sidebarOpen;
   document.getElementById('st-sidebar')?.classList.toggle('is-collapsed', !state.sidebarOpen);
   const btn = document.getElementById('sidebar-toggle-btn');
   if (btn) btn.textContent = state.sidebarOpen ? '◧' : '◨ UI패널';
+  if (state.sidebarOpen) setTimeout(syncDrawerSectionZoom, 260);
 }
 
 function setSideTab(tab) {
@@ -638,34 +665,34 @@ function renderDrawerVisualStage(catKey, item) {
   if (catKey === 'button') {
     const idx = Math.max(0, (VAULT.button || []).indexOf(item));
     const lbl = SAMPLE_BTN_LABELS[idx % SAMPLE_BTN_LABELS.length];
-    return `<div class="${pal.cls} ${fnt.cls}" style="width:100%;min-height:66px;padding:8px 6px;border-radius:8px;background:var(--bg);color:var(--fg);display:flex;align-items:center;justify-content:center;zoom:0.78;">
+    return `<div class="${pal.cls} ${fnt.cls}" style="width:100%;min-height:76px;padding:14px 12px;border-radius:10px;background:var(--bg);color:var(--fg);display:flex;align-items:center;justify-content:center;">
       ${item.render(lbl)}
     </div>`;
   }
 
   if (catKey === 'surface') {
-    return `<div class="${pal.cls} ${fnt.cls} ${item.cls}" style="width:100%;padding:10px;background:var(--bg);color:var(--fg);">
-      <div class="f-card" style="padding:10px;display:grid;grid-template-columns:68px 1fr;gap:10px;align-items:center;">
-        <div style="height:52px;border-radius:6px;overflow:hidden;"><img src="${IMG[w.works[0].img]}" alt="" style="width:100%;height:100%;object-fit:cover;display:block;"/></div>
+    return `<div class="${pal.cls} ${fnt.cls} ${item.cls}" style="width:100%;padding:14px;background:var(--bg);color:var(--fg);">
+      <div class="f-card" style="padding:14px;display:grid;grid-template-columns:92px 1fr;gap:14px;align-items:center;">
+        <div style="height:68px;border-radius:8px;overflow:hidden;"><img src="${IMG[w.works[0].img]}" alt="" style="width:100%;height:100%;object-fit:cover;display:block;"/></div>
         <div>
           <div style="display:flex;justify-content:space-between;align-items:center;">
-            <span style="font-size:12px;font-weight:800;">${w.works[0].title}</span>
-            <span style="width:8px;height:8px;border-radius:99px;background:var(--accent);"></span>
+            <span style="font-size:14px;font-weight:800;">${w.works[0].title}</span>
+            <span style="width:9px;height:9px;border-radius:99px;background:var(--accent);"></span>
           </div>
-          <div style="font-size:11px;color:var(--sub);margin-top:3px;">${w.works[0].price}</div>
+          <div style="font-size:12px;color:var(--sub);margin-top:4px;">${w.works[0].price}</div>
         </div>
       </div>
     </div>`;
   }
 
   if (catKey === 'imgstyle') {
-    return `<div class="${pal.cls} ${item.cls}" style="width:100%;padding:10px;background:var(--bg);display:flex;justify-content:center;">
-      <div class="f-media" style="width:100%;height:96px;"><img src="${IMG[w.heroImg]}" alt=""/></div>
+    return `<div class="${pal.cls} ${item.cls}" style="width:100%;padding:14px;background:var(--bg);display:flex;justify-content:center;">
+      <div class="f-media" style="width:100%;height:142px;"><img src="${IMG[w.heroImg]}" alt=""/></div>
     </div>`;
   }
 
   if (catKey === 'inputui') {
-    return `<div class="${pal.cls} ${fnt.cls}" style="width:100%;padding:12px 10px;background:var(--bg);color:var(--fg);display:flex;justify-content:center;zoom:0.84;">
+    return `<div class="${pal.cls} ${fnt.cls}" style="width:100%;padding:16px 14px;background:var(--bg);color:var(--fg);display:flex;justify-content:center;">
       ${item.demo()}
     </div>`;
   }
@@ -682,7 +709,7 @@ function renderDrawerVisualStage(catKey, item) {
       : item.mode === 'trail'
       ? `<span style="display:inline-flex;align-items:center;gap:5px;"><span style="width:6px;height:6px;border-radius:99px;background:#FDE68A;opacity:0.4;"></span><span style="width:10px;height:10px;border-radius:99px;background:#F59E0B;opacity:0.7;"></span><span style="width:20px;height:20px;border-radius:99px;border:1.5px solid #D4A359;"></span></span>`
       : `<span style="width:38px;height:38px;border-radius:999px;border:1.5px solid var(--accent);display:inline-flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;background:rgba(10,12,18,0.75);color:#fff;">VIEW</span>`;
-    return `<div class="${pal.cls}" style="width:100%;height:84px;background:var(--bg);color:var(--fg);position:relative;overflow:hidden;display:flex;align-items:center;justify-content:center;">
+    return `<div class="${pal.cls}" style="width:100%;height:104px;background:var(--bg);color:var(--fg);position:relative;overflow:hidden;display:flex;align-items:center;justify-content:center;">
       <img src="${IMG[w.secImg1]}" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:0.42;"/>
       <div style="position:relative;z-index:2;">${badgeVisual}</div>
     </div>`;
@@ -690,44 +717,44 @@ function renderDrawerVisualStage(catKey, item) {
 
   if (catKey === 'motion') {
     const animStyle = item.demoAnim ? `animation:${item.demoAnim} 2.6s cubic-bezier(0.16,1,0.3,1) infinite;` : '';
-    return `<div class="${pal.cls}" style="width:100%;height:88px;background:var(--bg);color:var(--fg);display:flex;align-items:center;justify-content:center;overflow:hidden;">
-      <div style="width:170px;padding:8px 10px;border-radius:8px;background:var(--surface);border:1px solid var(--border);box-shadow:0 10px 24px rgba(0,0,0,0.12);display:flex;align-items:center;gap:8px;${animStyle}">
-        <img src="${IMG[w.heroImg]}" alt="" style="width:32px;height:32px;border-radius:5px;object-fit:cover;"/>
-        <div style="flex:1;"><div style="height:6px;width:75%;border-radius:99px;background:var(--fg);"></div><div style="height:5px;width:48%;border-radius:99px;background:var(--accent);margin-top:5px;"></div></div>
+    return `<div class="${pal.cls}" style="width:100%;height:104px;background:var(--bg);color:var(--fg);display:flex;align-items:center;justify-content:center;overflow:hidden;">
+      <div style="width:210px;padding:10px 12px;border-radius:10px;background:var(--surface);border:1px solid var(--border);box-shadow:0 10px 24px rgba(0,0,0,0.12);display:flex;align-items:center;gap:10px;${animStyle}">
+        <img src="${IMG[w.heroImg]}" alt="" style="width:38px;height:38px;border-radius:6px;object-fit:cover;"/>
+        <div style="flex:1;"><div style="height:6px;width:75%;border-radius:99px;background:var(--fg);"></div><div style="height:5px;width:48%;border-radius:99px;background:var(--accent);margin-top:6px;"></div></div>
       </div>
     </div>`;
   }
 
   if (catKey === 'badge') {
-    return `<div class="${pal.cls}" style="width:100%;min-height:58px;padding:8px;border-radius:8px;background:var(--bg);color:var(--fg);display:flex;align-items:center;justify-content:center;zoom:0.85;">
+    return `<div class="${pal.cls}" style="width:100%;min-height:68px;padding:12px;border-radius:10px;background:var(--bg);color:var(--fg);display:flex;align-items:center;justify-content:center;">
       <span class="${item.cls}">${w.eyebrow}</span>
     </div>`;
   }
 
   if (catKey === 'preloader') {
-    return `<div class="${pal.cls}" style="width:100%;height:82px;background:#0A0C12;color:#F8FAFC;position:relative;overflow:hidden;display:flex;align-items:center;justify-content:center;">
+    return `<div class="${pal.cls}" style="width:100%;height:96px;background:#0A0C12;color:#F8FAFC;position:relative;overflow:hidden;display:flex;align-items:center;justify-content:center;">
       <img src="${IMG[w.heroImg]}" alt="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:0.35;"/>
       <div style="position:absolute;top:0;left:0;height:3px;width:72%;background:var(--accent);box-shadow:0 0 10px var(--accent);"></div>
-      <div style="position:relative;z-index:2;padding:4px 12px;border-radius:999px;background:rgba(9,11,16,0.85);border:1px solid rgba(255,255,255,0.18);font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;">${item.mode.includes('Curtain') ? `${w.brand} · 100%` : 'SCROLL 72%'}</div>
+      <div style="position:relative;z-index:2;padding:5px 14px;border-radius:999px;background:rgba(9,11,16,0.85);border:1px solid rgba(255,255,255,0.18);font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;">${item.mode.includes('Curtain') ? `${w.brand} · 100%` : 'SCROLL 72%'}</div>
     </div>`;
   }
 
   if (catKey === 'widget') {
     const raw = item.render(w, ctx);
     if (!raw) {
-      return `<div class="${pal.cls}" style="width:100%;height:68px;background:var(--bg);border:1px dashed var(--border);display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--sub);">CLEAN STAGE</div>`;
+      return `<div class="${pal.cls}" style="width:100%;height:76px;background:var(--bg);border:1px dashed var(--border);display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--sub);">CLEAN STAGE</div>`;
     }
-    return `<div class="${pal.cls} ${fnt.cls}" style="width:100%;height:84px;background:var(--bg);color:var(--fg);display:flex;align-items:center;justify-content:center;overflow:hidden;padding:4px;">
-      <div style="zoom:0.56;width:100%;">${raw.replace(/position:sticky;/g, 'position:relative;')}</div>
+    return `<div class="${pal.cls} ${fnt.cls}" style="width:100%;min-height:96px;background:var(--bg);color:var(--fg);display:flex;align-items:center;justify-content:center;overflow:hidden;padding:8px;">
+      <div style="zoom:0.72;width:100%;">${raw.replace(/position:sticky;/g, 'position:relative;')}</div>
     </div>`;
   }
 
-  /* 14 ~ 26: Live Scaled Full-Page Section UI! */
+  /* 14 ~ 26: Whole Uncropped Full-Page Section UI at Large Auto-Fit Scale! */
   const secHTML = typeof item.render === 'function' ? item.render(w, ctx) : '';
   return `<div class="st-drawer-sec-shell ${pal.cls} ${fnt.cls} ${tfx.cls} ${srf.cls} ${imgst.cls} ${inp.cls || ''}">
     ${secHTML
       ? `<div class="st-drawer-sec-scale">${secHTML}</div>`
-      : `<div style="height:56px;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--sub);">SPACER</div>`}
+      : `<div style="height:64px;display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--sub);">SPACER</div>`}
   </div>`;
 }
 
@@ -781,9 +808,6 @@ function renderDrawerCardsOnly() {
     (VAULT[activeMeta.key] || []).forEach(item => entries.push({ cat: activeMeta, item }));
   }
 
-  const use2Col = !q && (state.activeCat === 'button' || state.activeCat === 'badge');
-  cardsEl.classList.toggle('is-grid-2', use2Col);
-
   const bleedCats = new Set(['palette', 'shader', 'font', 'textfx', 'surface', 'imgstyle', 'cursor', 'motion', 'preloader', 'widget', ...TRAY_GROUPS.sections]);
 
   cardsEl.innerHTML = entries.length ? entries.map(({ cat, item }) => {
@@ -813,6 +837,7 @@ function renderDrawerCardsOnly() {
     }
   }
 
+  syncDrawerSectionZoom();
   initDrawerShaders(cardsEl);
 }
 
@@ -1125,7 +1150,8 @@ function mountLiveVisualGhost(catKey, item) {
   const fnt = getAsset('font', state.equipped.font);
   const srf = getAsset('surface', state.equipped.surface);
   const imgst = getAsset('imgstyle', state.equipped.imgstyle);
-  ghost.className = `st-drag-ghost f-site ${pal.cls} ${fnt.cls} ${srf.cls} ${imgst.cls}`;
+  const isSec = CATEGORIES.find(c => c.key === catKey)?.group === 'section';
+  ghost.className = `st-drag-ghost ${isSec ? 'is-sec-ghost' : ''} f-site ${pal.cls} ${fnt.cls} ${srf.cls} ${imgst.cls}`;
   ghost.innerHTML = renderDrawerVisualStage(catKey, item);
 }
 
@@ -1343,7 +1369,10 @@ function initDragAndDropSystem() {
 
     if (ghost) {
       ghost.style.display = 'flex';
-      ghost.style.transform = `translate3d(${e.clientX - 40}px, ${e.clientY - 24}px, 0) scale(0.96)`;
+      const isSecGhost = d.meta?.group === 'section';
+      const gx = isSecGhost ? Math.max(10, e.clientX - 150) : (e.clientX - 40);
+      const gy = isSecGhost ? Math.max(10, e.clientY - 46) : (e.clientY - 24);
+      ghost.style.transform = `translate3d(${gx}px, ${gy}px, 0) scale(0.96)`;
       ghost.classList.toggle('is-ready', insideFrame);
     }
 
@@ -3112,6 +3141,7 @@ function syncStudioViewportHeight() {
     app.style.border = '1px solid rgba(255, 255, 255, 0.11)';
     document.body.style.background = 'transparent';
   }
+  syncDrawerSectionZoom();
 }
 
 window.addEventListener('DOMContentLoaded', () => {

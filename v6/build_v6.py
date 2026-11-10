@@ -202,10 +202,13 @@ def main():
       <aside id="st-sidebar" class="st-sidebar">
         <div class="st-drawer-main">
           <div class="st-drawer-top">
-            <div class="st-tray-tabs">
-              <button type="button" id="tray-tab-sections" onclick="setTrayGroup('sections')" class="st-tray-tab is-active">🧩 섹션 UI</button>
-              <button type="button" id="tray-tab-components" onclick="setTrayGroup('components')" class="st-tray-tab">🎛 부품 UI</button>
-              <button type="button" id="tray-tab-themes" onclick="setTrayGroup('themes')" class="st-tray-tab">🎨 테마 UI</button>
+            <div class="st-tray-top-row">
+              <div class="st-tray-tabs">
+                <button type="button" id="tray-tab-sections" onclick="setTrayGroup('sections')" class="st-tray-tab is-active">🧩 섹션 UI</button>
+                <button type="button" id="tray-tab-components" onclick="setTrayGroup('components')" class="st-tray-tab">🎛 부품 UI</button>
+                <button type="button" id="tray-tab-themes" onclick="setTrayGroup('themes')" class="st-tray-tab">🎨 테마 UI</button>
+              </div>
+              <button type="button" id="tray-wide-btn" onclick="toggleTrayWide()" class="st-tray-zoom-btn" title="왼쪽 UI 패널을 더 넓게 키워서 섹션 전체를 큼직하게 봅니다">⇔ 더 크게</button>
             </div>
             <div id="st-drawer-cat-head" class="st-tray-chips"></div>
             <input id="drawer-search-input" type="search" oninput="setDrawerSearch(this.value)" placeholder="🔍 UI 검색 (히어로, 버튼, 요금표, 다크...)" class="st-drawer-search" style="width:100%;background:#141824;border:1px solid rgba(255,255,255,0.1);border-radius:7px;padding:5px 9px;color:#F8FAFC;font-size:11.5px;outline:none;" />
