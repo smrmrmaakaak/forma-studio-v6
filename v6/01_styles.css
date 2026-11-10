@@ -167,84 +167,179 @@ html, body {
 .st-qchip-lbl:hover { color: #FFFFFF; }
 
 /* ==========================================================================
-   MAIN WORKSPACE BODY (Collapsible Sidebar + Live Stage + Full Asset Atelier)
+   MAIN WORKSPACE BODY (Side-by-Side Visual Drag Drawer + Live Drop Homepage!)
    ========================================================================== */
+body.is-dragging, body.is-dragging * {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  cursor: grabbing !important;
+}
+
 .st-workspace {
   flex: 1; display: flex; min-height: 0; position: relative; overflow: hidden;
 }
 
 .st-sidebar {
-  width: 336px; min-width: 336px;
-  background: #0E1016;
-  border-right: 1px solid rgba(255,255,255,0.08);
-  display: flex; flex-direction: column; min-height: 0; z-index: 45;
+  width: 424px; min-width: 424px;
+  background: #0D0F15;
+  border-right: 1px solid rgba(255,255,255,0.1);
+  display: flex; flex-direction: row; min-height: 0; z-index: 45;
   transition: margin-left 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
-.st-sidebar.is-collapsed { margin-left: -336px; }
+.st-sidebar.is-collapsed { margin-left: -424px; }
 
-.st-side-tabs {
-  display: grid; grid-template-columns: repeat(3, 1fr);
-  padding: 6px 10px 0; gap: 4px;
-  border-bottom: 1px solid rgba(255,255,255,0.08); background: #0A0C10;
+/* Left Category Icon Rail (114px) — Always accessible without pushing cards down! */
+.st-cat-rail {
+  width: 114px; min-width: 114px;
+  background: #080A0E;
+  border-right: 1px solid rgba(255,255,255,0.08);
+  overflow-y: auto; overflow-x: hidden;
+  padding: 6px 5px 18px;
+  display: flex; flex-direction: column; gap: 2px;
+  user-select: none;
 }
-.st-side-tab {
-  border: none; background: transparent; color: #8A94A6;
-  font-family: inherit; font-size: 12px; font-weight: 700;
-  padding: 8px 4px 9px; cursor: pointer;
-  border-bottom: 2px solid transparent; transition: all 0.16s ease;
+.st-rail-group-lbl {
+  font-size: 10px; font-weight: 800; letter-spacing: 0.06em;
+  color: #64748B; padding: 8px 6px 4px; text-transform: uppercase;
 }
-.st-side-tab:hover { color: #E2E8F0; }
-.st-side-tab.is-active { color: #F8FAFC; border-bottom-color: #F8FAFC; }
+.st-rail-btn {
+  width: 100%; border: 1px solid transparent;
+  background: transparent; color: #94A3B8;
+  border-radius: 8px; padding: 7px 7px;
+  font-family: inherit; font-size: 12px; font-weight: 600;
+  display: flex; align-items: center; gap: 6px;
+  cursor: pointer; text-align: left; transition: all 0.14s ease;
+  white-space: nowrap; overflow: hidden;
+}
+.st-rail-btn:hover { background: rgba(255,255,255,0.06); color: #F8FAFC; }
+.st-rail-btn.is-active {
+  background: linear-gradient(135deg, #38BDF8 0%, #2563EB 100%);
+  color: #FFFFFF; font-weight: 800;
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.4);
+}
+.st-rail-ico { font-size: 13px; flex-shrink: 0; }
 
-.st-side-body { flex: 1; overflow-y: auto; display: flex; flex-direction: column; min-height: 0; }
-
-.st-cat-group-label {
-  padding: 10px 12px 5px; font-size: 12px; font-weight: 700; color: #94A3B8;
-  display: flex; justify-content: space-between; align-items: center;
+/* Right Visual Draggable Cards Column inside Drawer (310px) */
+.st-drawer-main {
+  flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0;
+  background: #0E1118;
 }
-.st-slot-grid {
-  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 5px; padding: 0 10px 10px;
-}
-.st-slot-chip {
-  text-align: left; background: #141720;
-  border: 1px solid rgba(255,255,255,0.07);
-  border-radius: 8px; padding: 7px 9px; cursor: pointer;
-  color: #CBD5E1; font-family: inherit; transition: all 0.15s ease;
-}
-.st-slot-chip:hover { background: #1B1F2B; border-color: rgba(255,255,255,0.18); }
-.st-slot-chip.is-active {
-  background: #F8FAFC; color: #090A0D; border-color: #F8FAFC;
-  box-shadow: 0 6px 18px rgba(0,0,0,0.35);
-}
-.st-slot-top { font-size: 12px; font-weight: 700; display: flex; justify-content: space-between; }
-.st-slot-sub {
-  font-size: 12px; opacity: 0.72; white-space: nowrap;
-  overflow: hidden; text-overflow: ellipsis; margin-top: 2px;
-}
-
-.st-picker-head {
-  position: sticky; top: 0; z-index: 10;
-  background: rgba(14,16,22,0.96); backdrop-filter: blur(10px);
-  padding: 9px 12px;
-  border-top: 1px solid rgba(255,255,255,0.09);
+.st-drawer-top {
+  padding: 9px 10px 8px;
+  background: #0B0E14;
   border-bottom: 1px solid rgba(255,255,255,0.08);
-  display: flex; justify-content: space-between; align-items: center;
+  display: flex; flex-direction: column; gap: 7px; flex-shrink: 0;
 }
-.st-picker-list { padding: 10px; display: flex; flex-direction: column; gap: 8px; }
-.st-asset-item {
-  padding: 11px 12px; border-radius: 10px;
-  background: #141720; border: 1px solid rgba(255,255,255,0.08);
-  cursor: pointer; transition: all 0.16s ease;
+.st-drawer-search {
+  width: 100%; background: #161A25;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 8px; padding: 7px 10px;
+  color: #F8FAFC; font-family: inherit; font-size: 12px; outline: none;
 }
-.st-asset-item:hover { background: #1A1E2A; border-color: rgba(255,255,255,0.22); }
-.st-asset-item.is-equipped {
-  border-color: #F8FAFC; background: #1C2130;
-  box-shadow: 0 0 0 1px #F8FAFC;
+.st-drawer-search:focus { border-color: #38BDF8; box-shadow: 0 0 0 2px rgba(56,189,248,0.2); }
+
+.st-drag-hint-bar {
+  display: flex; align-items: center; justify-content: space-between; gap: 6px;
+  padding: 6px 9px; border-radius: 7px;
+  background: rgba(56, 189, 248, 0.11);
+  border: 1px solid rgba(56, 189, 248, 0.28);
+  color: #BAE6FD; font-size: 11.5px; font-weight: 700;
+}
+
+.st-drawer-cards {
+  flex: 1; overflow-y: auto; overflow-x: hidden;
+  padding: 10px; display: flex; flex-direction: column; gap: 10px;
+}
+
+/* Visual Draggable Card inside Left Drawer */
+.st-drag-card {
+  background: #141823;
+  border: 1.5px solid rgba(255,255,255,0.09);
+  border-radius: 12px; overflow: hidden;
+  cursor: grab; position: relative;
+  transition: transform 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
+  user-select: none; touch-action: pan-y;
+}
+.st-drag-card:hover {
+  border-color: rgba(56, 189, 248, 0.65);
+  transform: translateY(-2px);
+  box-shadow: 0 12px 26px rgba(0,0,0,0.45);
+}
+.st-drag-card:active { cursor: grabbing; transform: scale(0.985); }
+.st-drag-card.is-equipped {
+  border-color: #38BDF8;
+  box-shadow: 0 0 0 1px #38BDF8, 0 10px 24px rgba(56,189,248,0.18);
+}
+
+.st-drag-card-head {
+  padding: 7px 10px;
+  background: #10131C;
+  border-bottom: 1px solid rgba(255,255,255,0.07);
+  display: flex; align-items: center; justify-content: space-between; gap: 6px;
+}
+.st-drag-grip {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 12px; font-weight: 700; color: #F1F5F9;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.st-drag-grip-dots {
+  color: #38BDF8; font-size: 13px; font-weight: 900; letter-spacing: -1px; flex-shrink: 0;
+}
+
+.st-drawer-stage {
+  padding: 10px;
+  background: #0A0C12;
+  display: flex; align-items: center; justify-content: center;
+  min-height: 92px; position: relative; overflow: hidden;
+}
+/* Make inner preview visuals never hijack pointer dragging! */
+.st-drawer-stage *, .st-drawer-stage img {
+  pointer-events: none !important;
+  -webkit-user-drag: none !important;
+}
+
+.st-drawer-sec-shell {
+  width: 100%; height: 142px; border-radius: 8px;
+  overflow: hidden; border: 1px solid rgba(255,255,255,0.11);
+  background: var(--bg, #FAF8F5); position: relative;
+}
+.st-drawer-sec-scale {
+  width: 1060px; zoom: 0.255; pointer-events: none; user-select: none;
+}
+
+/* Hidden Sections Restore Strip */
+.st-hidden-secs-bar {
+  padding: 8px 10px; background: #131722;
+  border-top: 1px solid rgba(255,255,255,0.09);
+  display: flex; flex-wrap: wrap; gap: 5px; align-items: center;
+}
+
+/* Floating Drag Ghost Following Cursor at 60fps */
+.st-drag-ghost {
+  position: fixed; top: 0; left: 0; z-index: 9999;
+  pointer-events: none; width: 256px;
+  background: rgba(15, 19, 28, 0.96);
+  backdrop-filter: blur(16px);
+  border: 2px solid #38BDF8;
+  border-radius: 12px; padding: 10px 12px;
+  box-shadow: 0 24px 60px rgba(0,0,0,0.75), 0 0 0 4px rgba(56,189,248,0.18);
+  display: none; flex-direction: column; gap: 6px;
+  transform: translate3d(-999px, -999px, 0) rotate(-1.5deg);
+}
+.st-drag-ghost.is-ready {
+  border-color: #10B981;
+  box-shadow: 0 24px 60px rgba(0,0,0,0.75), 0 0 0 5px rgba(16,185,129,0.28);
+}
+.st-drag-ghost-status {
+  font-size: 11px; font-weight: 800; padding: 3px 8px; border-radius: 999px;
+  background: rgba(56,189,248,0.18); color: #7DD3FC; align-self: flex-start;
+}
+.st-drag-ghost.is-ready .st-drag-ghost-status {
+  background: #10B981; color: #052E16;
 }
 
 /* ==========================================================================
-   STAGE & VIEWPORT SIMULATOR
+   STAGE, LIVE DROP TARGET HALOS & SECTION SEAM INSERTION LINE
    ========================================================================== */
 .st-stage {
   flex: 1; min-width: 0; position: relative;
@@ -254,8 +349,78 @@ html, body {
   flex: 1; width: 100%; max-width: 100%;
   overflow-y: auto; overflow-x: hidden; position: relative;
   background: #FAF8F5;
-  transition: max-width 0.35s cubic-bezier(0.16, 1, 0.3, 1), margin 0.35s ease, border-radius 0.35s ease;
+  transition: max-width 0.35s cubic-bezier(0.16, 1, 0.3, 1), margin 0.35s ease, border-radius 0.35s ease, box-shadow 0.2s ease;
 }
+.st-canvas-frame.is-drop-hot {
+  box-shadow: inset 0 0 0 4px #10B981;
+}
+
+/* Floating Drop Banner at top of Homepage during Drag */
+.st-drop-banner {
+  position: sticky; top: 10px; z-index: 95;
+  margin: 0 auto -42px; width: fit-content; max-width: 90%;
+  padding: 8px 18px; border-radius: 999px;
+  background: rgba(6, 78, 59, 0.95); color: #ECFDF5;
+  border: 1.5px solid #34D399;
+  font-size: 12.5px; font-weight: 800;
+  box-shadow: 0 14px 36px rgba(0,0,0,0.45);
+  pointer-events: none; display: none; align-items: center; gap: 8px;
+}
+.st-canvas-frame.is-drop-hot .st-drop-banner { display: inline-flex; }
+
+/* Matching Elements Glowing on Homepage when Dragging Button / Card / Photo / Font */
+@keyframes targetPulse {
+  0%, 100% { outline-color: #38BDF8; box-shadow: 0 0 0 4px rgba(56,189,248,0.28); }
+  50% { outline-color: #10B981; box-shadow: 0 0 0 8px rgba(16,185,129,0.34); }
+}
+.is-drop-target-el {
+  outline: 2.5px dashed #38BDF8 !important;
+  outline-offset: 4px !important;
+  animation: targetPulse 1.15s ease-in-out infinite !important;
+}
+
+/* Section Replace Highlight vs Section Seam Insertion Line */
+.f-sec-wrap.is-sec-replace-target {
+  outline: 3px solid #10B981 !important;
+  outline-offset: -3px !important;
+}
+.f-sec-wrap.is-sec-replace-target::after {
+  content: attr(data-drop-label);
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  z-index: 85; padding: 10px 22px; border-radius: 999px;
+  background: rgba(6, 78, 59, 0.95); color: #ECFDF5;
+  border: 2px solid #34D399; font-size: 13px; font-weight: 800;
+  box-shadow: 0 20px 50px rgba(0,0,0,0.55); pointer-events: none; white-space: nowrap;
+}
+
+.st-sec-drop-line {
+  position: fixed; left: 0; width: 0; height: 4px; z-index: 9990;
+  background: #38BDF8; box-shadow: 0 0 16px #38BDF8;
+  pointer-events: none; display: none; align-items: center; justify-content: center;
+}
+.st-sec-drop-line span {
+  padding: 5px 14px; border-radius: 999px;
+  background: #0284C7; color: #FFFFFF; border: 1.5px solid #BAE6FD;
+  font-size: 12px; font-weight: 800; white-space: nowrap;
+  box-shadow: 0 10px 28px rgba(0,0,0,0.5);
+}
+
+@keyframes dropAppliedFlash {
+  0% { box-shadow: inset 0 0 0 5px #38BDF8; }
+  100% { box-shadow: inset 0 0 0 0px transparent; }
+}
+.is-just-applied { animation: dropAppliedFlash 0.85s ease-out; }
+
+/* Fine-Tuning Floating Popover */
+.st-tune-popover {
+  position: fixed; top: 54px; right: 16px; width: 296px; z-index: 180;
+  background: #111520; border: 1px solid rgba(255,255,255,0.16);
+  border-radius: 14px; padding: 16px;
+  box-shadow: 0 24px 70px rgba(0,0,0,0.75);
+  display: none; flex-direction: column; gap: 14px;
+}
+.st-tune-popover.is-open { display: flex; }
+
 .st-canvas-frame.vp-tablet {
   max-width: 780px; margin: 14px auto; height: calc(100% - 28px);
   border-radius: 18px; border: 1px solid rgba(255,255,255,0.16);
@@ -920,13 +1085,20 @@ html, body {
 }
 .st-toast.is-visible { opacity: 1; transform: translate(-50%, 0); }
 
-@media (max-width: 980px) {
+@media (max-width: 1080px) {
   .hide-narrow { display: none !important; }
+  .st-sidebar { width: 328px; min-width: 328px; }
+  .st-sidebar.is-collapsed { margin-left: -328px; }
+  .st-cat-rail { width: 98px; min-width: 98px; }
+}
+
+@media (max-width: 659px) {
   .st-sidebar {
     position: absolute; top: 0; bottom: 0; left: 0; z-index: 56;
+    width: 312px; min-width: 312px;
     box-shadow: 24px 0 60px rgba(0, 0, 0, 0.8);
   }
-  .st-sidebar.is-collapsed { box-shadow: none; }
+  .st-sidebar.is-collapsed { margin-left: -312px; box-shadow: none; }
 }
 
 @media (max-height: 540px) {

@@ -65,29 +65,35 @@ def build_clean_embedded_fonts_v6(extra_texts: list[str]) -> str:
     kr_blocks = []
     total_raw_woff2 = 0
 
-    for spec, label in kr_specs:
-        fam_bytes = 0
-        for chunk in chunks:
-            q_text = urllib.parse.quote(chunk)
-            css_url = f"https://fonts.googleapis.com/css2?family={spec}&text={q_text}&display=swap"
-            raw_css = fetch_bytes(css_url).decode('utf-8')
+    try:
+        for spec, label in kr_specs:
+            fam_bytes = 0
+            for chunk in chunks:
+                q_text = urllib.parse.quote(chunk)
+                css_url = f"https://fonts.googleapis.com/css2?family={spec}&text={q_text}&display=swap"
+                raw_css = fetch_bytes(css_url).decode('utf-8')
 
-            for m in re.finditer(r'@font-face\s*\{([^}]+)\}', raw_css):
-                body = m.group(1)
-                u_match = re.search(r'url\((https://fonts\.gstatic\.com/[^)]+)\)', body)
-                if not u_match:
-                    continue
-                woff_bytes = fetch_bytes(u_match.group(1))
-                total_raw_woff2 += len(woff_bytes)
-                fam_bytes += len(woff_bytes)
-                b64_woff = base64.b64encode(woff_bytes).decode('ascii')
-                body_inlined = body.replace(
-                    u_match.group(0),
-                    f"url(data:font/woff2;base64,{b64_woff})",
-                ).strip()
-                block = f"@font-face {{\n  font-display: swap;\n  {body_inlined}\n}}"
-                kr_blocks.append(block)
-        print(f"  Embedded {label}: {fam_bytes:,} raw bytes")
+                for m in re.finditer(r'@font-face\s*\{([^}]+)\}', raw_css):
+                    body = m.group(1)
+                    u_match = re.search(r'url\((https://fonts\.gstatic\.com/[^)]+)\)', body)
+                    if not u_match:
+                        continue
+                    woff_bytes = fetch_bytes(u_match.group(1))
+                    total_raw_woff2 += len(woff_bytes)
+                    fam_bytes += len(woff_bytes)
+                    b64_woff = base64.b64encode(woff_bytes).decode('ascii')
+                    body_inlined = body.replace(
+                        u_match.group(0),
+                        f"url(data:font/woff2;base64,{b64_woff})",
+                    ).strip()
+                    block = f"@font-face {{\n  font-display: swap;\n  {body_inlined}\n}}"
+                    kr_blocks.append(block)
+            print(f"  Embedded {label}: {fam_bytes:,} raw bytes")
+    except Exception as exc:
+        if cached_path.exists() and cached_path.stat().st_size > 500_000:
+            print(f"  Font network fetch skipped ({exc}); using existing cached WOFF2 bundle ({cached_path.stat().st_size:,} bytes)")
+            return cached_path.read_text(encoding='utf-8')
+        raise
 
     print(f"Total raw Korean WOFF2 bytes: {total_raw_woff2:,} bytes")
     full_fonts_css = latin_css.strip() + "\n\n/* === EMBEDDED KOREAN WOFF2 SUBSETS === */\n" + "\n".join(kr_blocks) + "\n"
@@ -123,8 +129,8 @@ def main():
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>FORMA STUDIO v6 — 하이엔드 웹 디자인 에셋 아틀리에 & 풀페이지 조립 스튜디오</title>
-  <meta name="description" content="26개 모듈 슬롯, 252종 전수 라이브 에셋, 내장 한글·영문 웹폰트, 60fps 캔버스 셰이더, 시안 A/B/C 즉시 비교, 완전 동작 단독 코드 추출을 지원하는 웹 디자인 라이브러리" />
+  <title>FORMA STUDIO v7 — 직관적 드래그 앤 드롭 웹 디자인 스튜디오 (26종 카테고리 · 252개 실물 요소)</title>
+  <meta name="description" content="왼쪽 요소 서랍에서 실물 디자인 카드를 보고 마우스로 끌어다 놓기만 하면 홈페이지에 즉시 적용되는 직관적 웹 디자인 조립 스튜디오" />
   <style id="forma-fonts-css">
 {fonts_css}
   </style>
@@ -135,70 +141,70 @@ def main():
 <body>
   <div id="studio-app" class="st-app">
     <button type="button" onclick="togglePresentationMode(false)" class="st-exit-pres">
-      <span>✕ 스튜디오 편집 모드로 돌아가기 (ESC)</span>
+      <span>✕ 편집 화면으로 돌아가기 (ESC)</span>
     </button>
 
-    <!-- ROW 1: MASTER COMMAND BAR -->
+    <!-- ROW 1: INTUITIVE MASTER COMMAND BAR -->
     <header class="st-topbar">
       <div class="st-brand">
-        <button type="button" id="sidebar-toggle-btn" onclick="toggleSidebar()" class="st-pill-btn">◧ 패널 접기</button>
+        <button type="button" id="sidebar-toggle-btn" onclick="toggleSidebar()" class="st-pill-btn">◧ 요소창 접기</button>
         <span class="st-logo-mark">F</span>
-        <span class="st-brand-name">FORMA STUDIO</span>
-        <span class="st-brand-tag hide-narrow">v6 · 26 SLOTS · 252 ASSETS</span>
+        <span class="st-brand-name">FORMA</span>
+        <select id="world-select" aria-label="업종 기본 템플릿" onchange="switchWorld(this.value)" class="st-select">
+          <option value="maison">업종: 1. 럭셔리 건축 스테이</option>
+          <option value="obsidian">업종: 2. AI · 엔터프라이즈 SaaS</option>
+          <option value="botanica">업종: 3. 보태니컬 퍼퓸 · 뷰티</option>
+          <option value="eclipse">업종: 4. 미쉐린 파인다이닝</option>
+          <option value="hanlaw">업종: 5. 글로벌 로펌 · 금융자문</option>
+          <option value="kinetic">업종: 6. 크리에이티브 에이전시</option>
+        </select>
+        <button type="button" id="undo-btn" onclick="undoLastAction()" class="st-pill-btn" title="방금 바꾼 디자인 되돌리기 (Ctrl+Z)">↩ 되돌리기</button>
+        <button type="button" onclick="randomizeCombination()" class="st-pill-btn" title="26개 요소를 랜덤으로 조합">🎲 랜덤조합</button>
       </div>
 
-      <!-- MODE SWITCHER: Full Homepage Combiner vs 252 Live Asset Atelier -->
+      <!-- MODE SWITCHER: Drag-and-Drop Builder vs Full 252 Grid -->
       <div class="st-mode-seg">
         <button type="button" id="mode-btn-builder" onclick="setStudioMode('builder')" class="st-mode-btn is-active">
-          <span>🖥 풀페이지 조합</span>
+          <span>🖱 드래그 조립 스튜디오</span>
         </button>
         <button type="button" id="mode-btn-vault" onclick="setStudioMode('vault')" class="st-mode-btn">
-          <span>✦ 개별 에셋 아틀리에 (252종)</span>
+          <span>⊞ 252개 전체 펼쳐보기</span>
         </button>
       </div>
 
-      <!-- INDUSTRY PRESET + VIEWPORT + PRESENTATION + CODE EXPORT -->
+      <!-- VIEWPORT + PRESENTATION + DOWNLOAD + CODE EXPORT -->
       <div class="st-actions">
-        <select id="world-select" aria-label="업종 월드 프리셋" onchange="switchWorld(this.value)" class="st-select">
-          <option value="maison">1. 럭셔리 건축 스테이</option>
-          <option value="obsidian">2. AI · 엔터프라이즈 SaaS</option>
-          <option value="botanica">3. 보태니컬 퍼퓸 · 뷰티</option>
-          <option value="eclipse">4. 미쉐린 파인다이닝</option>
-          <option value="hanlaw">5. 글로벌 로펌 · 금융자문</option>
-          <option value="kinetic">6. 크리에이티브 에이전시</option>
-        </select>
-        <button type="button" onclick="randomizeCombination()" class="st-pill-btn" title="26개 슬롯 전체 랜덤 믹스">🎲 믹스</button>
-        <button type="button" onclick="replaySiteMotions()" class="st-pill-btn hide-narrow" title="스크롤 등장 모션 및 카운터 재생">▶ 모션</button>
-        <button type="button" id="inline-edit-btn" onclick="toggleInlineEdit()" class="st-pill-btn hide-narrow" title="홈페이지 문구 직접 클릭 타이핑 수정">✏️ 문구수정</button>
         <div class="st-mode-seg hide-narrow">
-          <button type="button" id="vp-btn-desktop" onclick="setViewportSize('desktop')" class="st-mode-btn is-active" style="padding:4px 8px;">Desktop</button>
-          <button type="button" id="vp-btn-tablet" onclick="setViewportSize('tablet')" class="st-mode-btn" style="padding:4px 8px;">Tablet</button>
-          <button type="button" id="vp-btn-mobile" onclick="setViewportSize('mobile')" class="st-mode-btn" style="padding:4px 8px;">Mobile</button>
+          <button type="button" id="vp-btn-desktop" onclick="setViewportSize('desktop')" class="st-mode-btn is-active" style="padding:4px 8px;">PC</button>
+          <button type="button" id="vp-btn-tablet" onclick="setViewportSize('tablet')" class="st-mode-btn" style="padding:4px 8px;">태블릿</button>
+          <button type="button" id="vp-btn-mobile" onclick="setViewportSize('mobile')" class="st-mode-btn" style="padding:4px 8px;">모바일</button>
         </div>
-        <button type="button" onclick="togglePresentationMode(true)" class="st-pill-btn hide-narrow" title="클라이언트 미팅용 풀스크린">👁 고객미팅 뷰</button>
-        <button type="button" onclick="downloadStudioSelfHTML()" class="st-pill-btn" style="border-color:rgba(56,189,248,0.45);color:#7DD3FC;" title="이 스튜디오 전체를 단일 .html 파일로 저장해 내 PC 크롬에서 바로 열기">⬇ 크롬용 파일받기</button>
-        <button type="button" onclick="openFullWebsiteExport()" class="st-pill-btn is-primary">&lt;/&gt; 코드 추출</button>
+        <button type="button" onclick="togglePresentationMode(true)" class="st-pill-btn hide-narrow" title="고객에게 보여줄 깔끔한 전체화면">👁 전체화면 미리보기</button>
+        <button type="button" onclick="downloadStudioSelfHTML()" class="st-pill-btn hide-narrow" style="border-color:rgba(56,189,248,0.45);color:#7DD3FC;" title="단일 .html 파일로 저장해 크롬에서 오프라인으로도 바로 열기">⬇ 파일저장</button>
+        <button type="button" onclick="openFullWebsiteExport()" class="st-pill-btn is-primary">&lt;/&gt; 완성 코드 추출</button>
       </div>
     </header>
 
-    <!-- ROW 2: 1-CLICK QUICK SLOT STEPPER + CLIENT A/B/C PROPOSAL COMPARE -->
+    <!-- ROW 2: DRAG GUIDE + QUICK TOOLS + A/B/C COMPARE -->
     <div id="st-subbar" class="st-subbar"></div>
 
-    <!-- MAIN WORKSPACE -->
+    <!-- MAIN WORKSPACE: VISUAL ELEMENT DRAWER (LEFT) + LIVE HOMEPAGE DROP TARGET (RIGHT) -->
     <div class="st-workspace">
-      <!-- COLLAPSIBLE LEFT INSPECTOR -->
       <aside id="st-sidebar" class="st-sidebar">
-        <div class="st-side-tabs">
-          <button type="button" id="stab-slots" onclick="setSideTab('slots')" class="st-side-tab is-active">에셋 장착 (26)</button>
-          <button type="button" id="stab-composer" onclick="setSideTab('composer')" class="st-side-tab">섹션 순서 (13)</button>
-          <button type="button" id="stab-tokens" onclick="setSideTab('tokens')" class="st-side-tab">디테일 튜닝</button>
+        <nav id="st-cat-rail" class="st-cat-rail" aria-label="요소 카테고리 선택"></nav>
+        <div class="st-drawer-main">
+          <div class="st-drawer-top">
+            <input id="drawer-search-input" type="search" oninput="setDrawerSearch(this.value)" placeholder="🔍 버튼, 골드, 명조, 요금표, 예약 검색..." class="st-drawer-search" />
+            <div id="st-drawer-cat-head" class="st-drag-hint-bar"></div>
+          </div>
+          <div id="st-drawer-cards" class="st-drawer-cards"></div>
+          <div id="st-hidden-secs-bar" class="st-hidden-secs-bar" style="display:none;"></div>
         </div>
-        <div id="st-side-body" class="st-side-body"></div>
       </aside>
 
-      <!-- LIVE WEBSITE STAGE + 252 LIVE ASSET ATELIER -->
       <main class="st-stage">
         <div id="canvas-frame" class="st-canvas-frame">
+          <div id="st-drop-banner" class="st-drop-banner">✨ 여기서 마우스를 놓으면 홈페이지에 바로 적용됩니다!</div>
           <div id="website-mount"></div>
         </div>
 
@@ -212,6 +218,11 @@ def main():
       </main>
     </div>
   </div>
+
+  <!-- FLOATING DRAG GHOST, SECTION INSERTION SNAP LINE & FINE-TUNE POPOVER -->
+  <div id="st-drag-ghost" class="st-drag-ghost"></div>
+  <div id="st-sec-drop-line" class="st-sec-drop-line"><span id="st-sec-drop-label">➕ 여기에 배치하기</span></div>
+  <div id="st-tune-popover" class="st-tune-popover"></div>
 
   <!-- CUSTOM CURSOR FOLLOWER -->
   <div id="f-cursor-ring" class="f-cursor-ring"></div>
@@ -271,6 +282,8 @@ def main():
         ARTIFACT_DIR / 'forma_studio.html',
         ARTIFACT_DIR / 'web_design_library.html',
         BASE / 'index.html',
+        BASE / 'FORMA_STUDIO_v6.html',
+        BASE / 'FORMA_STUDIO_v7.html',
     ]
     for t in targets:
         t.write_text(html, encoding='utf-8')
@@ -279,3 +292,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+

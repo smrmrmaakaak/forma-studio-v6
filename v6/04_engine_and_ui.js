@@ -56,17 +56,20 @@ const state = {
   mode: 'builder',          // 'builder' | 'vault'
   presentation: false,
   sidebarOpen: true,
-  sideTab: 'slots',         // 'slots' | 'composer' | 'tokens'
+  sideTab: 'slots',
   viewport: 'desktop',      // 'desktop' | 'tablet' | 'mobile'
   guidesOn: true,
   inlineEdit: false,
+  tuneOpen: false,
   worldKey: 'maison',
   activeCat: 'button',
+  drawerQuery: '',
   vaultFilter: 'all',
   vaultQuery: '',
   reviewIdx: 0,
   proposalSlot: 'A',
   proposals: makeInitialProposals(),
+  undoStack: [],
   exportTab: 'code',        // 'code' | 'preview'
   lastExportPreviewDoc: '',
   tokens: {
@@ -95,29 +98,55 @@ function showStudioToast(msg) {
 }
 
 /* ==========================================================================
-   QUICK SUBBAR + CLIENT A/B/C PROPOSAL SWITCHER
+   UNDO HISTORY STACK (Ctrl+Z / ↩ 되돌리기)
+   ========================================================================== */
+function pushUndoSnapshot() {
+  state.undoStack.push({
+    worldKey: state.worldKey,
+    equipped: { ...state.equipped },
+    secOrder: [...state.secOrder],
+    secEnabled: { ...state.secEnabled },
+    tokens: { ...state.tokens }
+  });
+  if (state.undoStack.length > 35) state.undoStack.shift();
+  updateUndoButtonUI();
+}
+
+function updateUndoButtonUI() {
+  const btn = document.getElementById('undo-btn');
+  if (!btn) return;
+  const n = state.undoStack.length;
+  btn.style.opacity = n > 0 ? '1' : '0.45';
+  btn.textContent = n > 0 ? `↩ 되돌리기 (${n})` : '↩ 되돌리기';
+}
+
+function undoLastAction() {
+  const snap = state.undoStack.pop();
+  if (!snap) {
+    showStudioToast('더 이상 되돌릴 변경 내역이 없습니다.');
+    return;
+  }
+  state.worldKey = snap.worldKey;
+  state.equipped = { ...snap.equipped };
+  state.secOrder = [...snap.secOrder];
+  state.secEnabled = { ...snap.secEnabled };
+  state.tokens = { ...snap.tokens };
+  const sel = document.getElementById('world-select');
+  if (sel) sel.value = state.worldKey;
+  updateUndoButtonUI();
+  renderQuickSubbar();
+  renderSidebarBody();
+  renderLiveWebsite();
+  if (state.mode === 'vault') renderVaultView();
+  showStudioToast('↩ 이전 디자인 상태로 되돌렸습니다.');
+}
+
+/* ==========================================================================
+   INTUITIVE HELPER SUBBAR + CLIENT A/B/C COMPARE + FINE-TUNING POPOVER
    ========================================================================== */
 function renderQuickSubbar() {
   const el = document.getElementById('st-subbar');
   if (!el) return;
-
-  const quickKeys = [
-    ['palette', '컬러'],
-    ['font', '서체'],
-    ['button', '버튼'],
-    ['surface', '카드'],
-    ['hero', '히어로']
-  ];
-
-  const chips = quickKeys.map(([k, lbl]) => {
-    const eq = getAsset(k, state.equipped[k]);
-    const shortName = eq.name.length > 11 ? eq.name.slice(0, 11) + '…' : eq.name;
-    return `<div class="st-qchip">
-      <button type="button" onclick="cycleSlot('${k}', -1, event)" title="이전 ${lbl}">‹</button>
-      <span class="st-qchip-lbl" onclick="setStudioMode('builder');selectSlotCategory('${k}')" title="클릭하여 ${lbl} 목록 열기">${lbl}: <strong style="color:#F8FAFC;">${shortName}</strong></span>
-      <button type="button" onclick="cycleSlot('${k}', 1, event)" title="다음 ${lbl}">›</button>
-    </div>`;
-  }).join('');
 
   const propBtns = ['A', 'B', 'C'].map(slot => {
     const isAct = state.proposalSlot === slot;
@@ -125,14 +154,68 @@ function renderQuickSubbar() {
   }).join('');
 
   el.innerHTML = `
-    <div class="st-quick-strip">
-      ${chips}
+    <div style="display:flex;align-items:center;gap:8px;white-space:nowrap;">
+      <span style="padding:3px 9px;border-radius:999px;background:rgba(56,189,248,0.14);border:1px solid rgba(56,189,248,0.34);color:#7DD3FC;font-size:12px;font-weight:800;">
+        💡 왼쪽 요소를 마우스로 잡고 오른쪽 홈페이지에 끌어다 놓으세요! (클릭도 바로 적용)
+      </span>
+      <button type="button" id="inline-edit-btn" onclick="toggleInlineEdit()" class="st-pill-btn ${state.inlineEdit?'is-active':''}" style="padding:3px 9px;" title="홈페이지 글자를 직접 클릭해 수정">✏️ 글자직접수정</button>
+      <button type="button" onclick="toggleTunePopover()" class="st-pill-btn ${state.tuneOpen?'is-active':''}" style="padding:3px 9px;" title="모서리 둥글기·여백·포인트색 미세조절">⚙️ 둥글기·여백</button>
+      <button type="button" onclick="triggerIntroCurtain()" class="st-pill-btn hide-narrow" style="padding:3px 9px;">🎬 오프닝시연</button>
     </div>
     <div style="display:flex;align-items:center;gap:5px;flex-shrink:0;">
-      <span style="font-size:12px;color:#94A3B8;margin-right:2px;" class="hide-narrow">고객 제안 비교:</span>
+      <span style="font-size:12px;color:#94A3B8;margin-right:2px;" class="hide-narrow">시안 비교:</span>
       ${propBtns}
       <button type="button" onclick="saveCurrentToProposalSlot()" class="st-pill-btn hide-narrow" style="padding:3px 9px;" title="현재 조합을 시안 ${state.proposalSlot}에 덮어쓰기">💾 시안${state.proposalSlot} 저장</button>
-      <button type="button" onclick="triggerIntroCurtain()" class="st-pill-btn" style="padding:3px 9px;" title="Awwwards풍 인트로 커튼 오프닝 시연">🎬 인트로 시연</button>
+    </div>
+  `;
+  renderTunePopover();
+}
+
+function toggleTunePopover(force) {
+  state.tuneOpen = typeof force === 'boolean' ? force : !state.tuneOpen;
+  const pop = document.getElementById('st-tune-popover');
+  if (pop) pop.classList.toggle('is-open', state.tuneOpen);
+  renderQuickSubbar();
+}
+
+function renderTunePopover() {
+  const pop = document.getElementById('st-tune-popover');
+  if (!pop) return;
+  pop.classList.toggle('is-open', state.tuneOpen);
+  pop.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid rgba(255,255,255,0.09);padding-bottom:8px;">
+      <strong style="font-size:13px;color:#F8FAFC;">⚙️ 전체 홈페이지 미세 조절</strong>
+      <button type="button" onclick="toggleTunePopover(false)" class="st-pill-btn" style="padding:2px 7px;">✕</button>
+    </div>
+    <div>
+      <div style="display:flex;justify-content:space-between;font-size:12px;font-weight:700;margin-bottom:6px;">
+        <span>버튼·카드 모서리 둥글기</span>
+        <span class="f-mono">${state.tokens.radius}px</span>
+      </div>
+      <input type="range" min="0" max="28" value="${state.tokens.radius}" oninput="updateToken('radius', this.value)" style="width:100%;accent-color:#38BDF8;cursor:pointer;" />
+    </div>
+    <div>
+      <div style="font-size:12px;font-weight:700;margin-bottom:6px;">섹션 상하 여백 넓이</div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:5px;">
+        ${[['compact','촘촘하게'],['balanced','기본'],['editorial','넓고 여유롭게']].map(([v, lbl]) => `
+          <button type="button" onclick="updateToken('density','${v}')" class="st-pill-btn ${state.tokens.density===v?'is-active':''}" style="justify-content:center;padding:5px 4px;">${lbl}</button>
+        `).join('')}
+      </div>
+    </div>
+    <div>
+      <div style="display:flex;justify-content:space-between;font-size:12px;font-weight:700;margin-bottom:6px;">
+        <span>필름 질감(그레인) 농도</span>
+        <span class="f-mono">${Math.round(state.tokens.grain * 1000) / 10}%</span>
+      </div>
+      <input type="range" min="0" max="0.09" step="0.005" value="${state.tokens.grain}" oninput="updateToken('grain', this.value)" style="width:100%;accent-color:#38BDF8;cursor:pointer;" />
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <span style="font-size:12px;font-weight:700;">포인트 색상 직접 지정</span>
+      <input type="color" value="${state.tokens.customAccent || '#8C5A32'}" oninput="updateToken('customAccent', this.value)" style="width:34px;height:26px;border:none;background:transparent;cursor:pointer;" />
+    </div>
+    <div style="padding-top:8px;border-top:1px solid rgba(255,255,255,0.08);display:flex;justify-content:space-between;align-items:center;">
+      <span style="font-size:12px;font-weight:600;">섹션 위 빠른 편집바 표시</span>
+      <button type="button" onclick="updateToken('guidesOn', !state.guidesOn)" class="st-pill-btn ${state.guidesOn?'is-active':''}">${state.guidesOn?'켜짐':'꺼짐'}</button>
     </div>
   `;
 }
@@ -140,6 +223,7 @@ function renderQuickSubbar() {
 function loadProposalSlot(slot) {
   const snap = state.proposals[slot];
   if (!snap) return;
+  pushUndoSnapshot();
   state.proposalSlot = slot;
   state.worldKey = snap.worldKey || state.worldKey;
   const sel = document.getElementById('world-select');
@@ -150,7 +234,7 @@ function loadProposalSlot(slot) {
   renderSidebarBody();
   renderLiveWebsite();
   if (state.mode === 'vault') renderVaultView();
-  showStudioToast(`[시안 ${slot}] 디자인 조합으로 즉시 전환되었습니다.`);
+  showStudioToast(`[시안 ${slot}] 조합으로 전환되었습니다.`);
 }
 
 function saveCurrentToProposalSlot() {
@@ -162,13 +246,14 @@ function saveCurrentToProposalSlot() {
     tokens: { ...state.tokens }
   };
   renderQuickSubbar();
-  showStudioToast(`현재 26개 슬롯 조합이 [시안 ${slot}]에 저장되었습니다.`);
+  showStudioToast(`현재 홈페이지 조합이 [시안 ${slot}]에 저장되었습니다.`);
 }
 
 /* ==========================================================================
    MODE, SIDEBAR, VIEWPORT & WORLD CONTROLS
    ========================================================================== */
 let vaultShaderRAF = null;
+let drawerShaderRAF = null;
 
 function setStudioMode(mode) {
   state.mode = mode;
@@ -189,7 +274,9 @@ function togglePresentationMode(force) {
   document.getElementById('studio-app')?.classList.toggle('is-presentation', state.presentation);
   if (state.presentation) {
     setStudioMode('builder');
-    showStudioToast('고객 프레젠테이션 풀스크린 모드 (ESC 또는 우측 상단 버튼으로 복귀)');
+    state.tuneOpen = false;
+    renderTunePopover();
+    showStudioToast('고객 미팅용 깔끔한 전체화면 모드입니다 (ESC로 편집 복귀)');
   }
 }
 
@@ -197,14 +284,11 @@ function toggleSidebar() {
   state.sidebarOpen = !state.sidebarOpen;
   document.getElementById('st-sidebar')?.classList.toggle('is-collapsed', !state.sidebarOpen);
   const btn = document.getElementById('sidebar-toggle-btn');
-  if (btn) btn.textContent = state.sidebarOpen ? '◧ 패널 접기' : '◨ 에셋 패널 열기';
+  if (btn) btn.textContent = state.sidebarOpen ? '◧ 요소창 접기' : '◨ 요소창 열기';
 }
 
 function setSideTab(tab) {
   state.sideTab = tab;
-  ['slots', 'composer', 'tokens'].forEach(k => {
-    document.getElementById(`stab-${k}`)?.classList.toggle('is-active', k === tab);
-  });
   renderSidebarBody();
 }
 
@@ -223,7 +307,7 @@ function setViewportSize(vp) {
 
 function toggleInlineEdit() {
   state.inlineEdit = !state.inlineEdit;
-  document.getElementById('inline-edit-btn')?.classList.toggle('is-active', state.inlineEdit);
+  renderQuickSubbar();
   const site = document.getElementById('hp-root');
   if (site) {
     site.classList.toggle('is-editing', state.inlineEdit);
@@ -231,12 +315,13 @@ function toggleInlineEdit() {
       el.contentEditable = state.inlineEdit ? 'true' : 'false';
     });
   }
-  showStudioToast(state.inlineEdit ? '문구 직접 수정 ON: 홈페이지의 제목·본문을 클릭해 바로 타이핑하세요.' : '문구 직접 수정 모드를 종료했습니다.');
+  showStudioToast(state.inlineEdit ? '✏️ 글자 직접 수정 켜짐: 홈페이지의 글씨를 클릭해 바로 타이핑하세요.' : '글자 직접 수정 모드를 껐습니다.');
 }
 
 function switchWorld(worldKey) {
   const w = WORLDS[worldKey];
   if (!w) return;
+  pushUndoSnapshot();
   state.worldKey = worldKey;
   state.tokens.customAccent = null;
   state.equipped = { ...w.preset };
@@ -246,10 +331,11 @@ function switchWorld(worldKey) {
   renderLiveWebsite();
   if (state.mode === 'vault') renderVaultView();
   document.getElementById('canvas-frame')?.scrollTo({ top: 0, behavior: 'smooth' });
-  showStudioToast(`${w.brand} 월드와 26개 전용 에셋 조합이 장착되었습니다.`);
+  showStudioToast(`${w.brand} 업종 템플릿이 적용되었습니다.`);
 }
 
 function randomizeCombination() {
+  pushUndoSnapshot();
   CATEGORIES.forEach(c => {
     const list = VAULT[c.key] || [];
     if (list.length) {
@@ -263,27 +349,44 @@ function randomizeCombination() {
   renderSidebarBody();
   renderLiveWebsite();
   if (state.mode === 'vault') renderVaultView();
-  showStudioToast('26개 슬롯 전체를 새로운 아틀리에 조합으로 믹스매치했습니다.');
+  showStudioToast('🎲 26개 요소를 랜덤으로 새롭게 조합했습니다! (↩ 되돌리기 가능)');
 }
 
 function selectSlotCategory(catKey) {
   state.activeCat = catKey;
-  if (state.sideTab !== 'slots') {
-    state.sideTab = 'slots';
-    ['slots', 'composer', 'tokens'].forEach(k => {
-      document.getElementById(`stab-${k}`)?.classList.toggle('is-active', k === 'slots');
-    });
-  }
+  state.drawerQuery = '';
+  const inp = document.getElementById('drawer-search-input');
+  if (inp) inp.value = '';
+  if (!state.sidebarOpen) toggleSidebar();
   renderSidebarBody();
+  const cardsEl = document.getElementById('st-drawer-cards');
+  if (cardsEl && cardsEl.scrollTo) cardsEl.scrollTo({ top: 0, behavior: 'smooth' });
   const meta = CATEGORIES.find(c => c.key === catKey);
   if (meta?.secId && state.mode === 'builder') {
     document.getElementById(meta.secId)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 }
 
+function focusDrawerCategory(catKey) {
+  setStudioMode('builder');
+  selectSlotCategory(catKey);
+  const meta = CATEGORIES.find(c => c.key === catKey);
+  if (meta) {
+    showStudioToast(`왼쪽 서랍에 [${meta.icon} ${meta.shortName}] 목록을 열었습니다. 원하는 카드를 끌어다 놓으세요!`);
+  }
+}
+
+function setDrawerSearch(q) {
+  state.drawerQuery = q || '';
+  renderDrawerCardsOnly();
+}
+
 function equipAsset(catKey, assetId, jumpToBuilder = false) {
   state.equipped[catKey] = assetId;
   if (catKey === 'palette') state.tokens.customAccent = null;
+  if (CATEGORIES.find(c => c.key === catKey)?.group === 'section') {
+    state.secEnabled[catKey] = true;
+  }
   state.activeCat = catKey;
   renderQuickSubbar();
   renderSidebarBody();
@@ -295,15 +398,20 @@ function equipAsset(catKey, assetId, jumpToBuilder = false) {
   }
 
   const item = getAsset(catKey, assetId);
+  const meta = CATEGORIES.find(c => c.key === catKey);
   if (catKey === 'preloader' && (item.mode === 'splitCurtain' || item.mode === 'monogramCurtain' || item.mode === 'shutterCurtain')) {
     setTimeout(() => triggerIntroCurtain(item.mode), 60);
-  } else {
-    const meta = CATEGORIES.find(c => c.key === catKey);
-    if (meta?.secId && state.mode === 'builder') {
-      setTimeout(() => document.getElementById(meta.secId)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 40);
-    }
+  } else if (meta?.secId && state.mode === 'builder') {
+    setTimeout(() => {
+      const targetEl = document.getElementById(meta.secId);
+      if (targetEl) {
+        targetEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        targetEl.classList.add('is-just-applied');
+        setTimeout(() => targetEl.classList.remove('is-just-applied'), 900);
+      }
+    }, 40);
   }
-  showStudioToast(`[${item.id}] ${item.name} 장착 완료`);
+  showStudioToast(`✓ [${meta ? meta.shortName : catKey}] "${item.name}" 적용 완료!`);
 }
 
 function cycleSlot(catKey, dir, ev) {
@@ -319,6 +427,7 @@ function moveSectionOrder(secKey, dir) {
   const idx = state.secOrder.indexOf(secKey);
   const target = idx + dir;
   if (idx < 0 || target < 0 || target >= state.secOrder.length) return;
+  pushUndoSnapshot();
   const arr = [...state.secOrder];
   [arr[idx], arr[target]] = [arr[target], arr[idx]];
   state.secOrder = arr;
@@ -327,9 +436,27 @@ function moveSectionOrder(secKey, dir) {
 }
 
 function toggleSectionVisible(secKey) {
+  pushUndoSnapshot();
   state.secEnabled[secKey] = !state.secEnabled[secKey];
   renderSidebarBody();
   renderLiveWebsite();
+}
+
+function hideSectionWithUndo(secKey) {
+  pushUndoSnapshot();
+  state.secEnabled[secKey] = false;
+  renderSidebarBody();
+  renderLiveWebsite();
+  const meta = CATEGORIES.find(c => c.key === secKey);
+  showStudioToast(`[${meta?.shortName || secKey}] 섹션을 뺐습니다. 왼쪽 하단 복구 버튼이나 ↩ 되돌리기로 복구 가능합니다.`);
+}
+
+function restoreHiddenSection(secKey) {
+  pushUndoSnapshot();
+  state.secEnabled[secKey] = true;
+  renderSidebarBody();
+  renderLiveWebsite();
+  setTimeout(() => document.getElementById('sec-' + secKey)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50);
 }
 
 function updateToken(key, val) {
@@ -338,190 +465,562 @@ function updateToken(key, val) {
   if (key === 'grain') state.tokens.grain = Number(val);
   if (key === 'customAccent') state.tokens.customAccent = val;
   if (key === 'guidesOn') state.guidesOn = Boolean(val);
-  renderSidebarBody();
+  renderTunePopover();
   renderLiveWebsite();
 }
 
 /* ==========================================================================
-   SIDEBAR RENDERING (26 Slots / Section Composer / Fine-Tuning)
+   SIDE-BY-SIDE VISUAL DRAG DRAWER (100% Live Visual Previews Next to Page!)
    ========================================================================== */
-function renderMiniStagePreview(catKey, item) {
-  const pal = getAsset('palette', state.equipped.palette);
-  const fnt = getAsset('font', state.equipped.font);
+function renderDrawerVisualStage(catKey, item) {
+  const w     = WORLDS[state.worldKey] || WORLDS.maison;
+  const pal   = getAsset('palette', state.equipped.palette);
+  const fnt   = getAsset('font', state.equipped.font);
+  const tfx   = getAsset('textfx', state.equipped.textfx);
+  const srf   = getAsset('surface', state.equipped.surface);
+  const imgst = getAsset('imgstyle', state.equipped.imgstyle);
+  const inp   = getAsset('inputui', state.equipped.inputui);
+  const bdg   = getAsset('badge', state.equipped.badge);
+  const btn   = getAsset('button', state.equipped.button);
+  const ctx   = { bdgCls: bdg.cls, tfxId: tfx.id, btn: (l) => btn.render(l) };
+
   if (catKey === 'palette') {
-    return `<div style="display:flex;align-items:center;gap:6px;margin-top:8px;">
-      ${item.swatches.map(hex => `<span style="width:22px;height:22px;border-radius:6px;background:${hex};border:1px solid rgba(255,255,255,0.22);"></span>`).join('')}
-      <span class="f-mono" style="font-size:12px;color:#94A3B8;margin-left:4px;">${item.swatches.join(' · ')}</span>
+    return `<div class="${item.cls}" style="width:100%;padding:11px 12px;border-radius:8px;background:var(--bg);color:var(--fg);border:1px solid var(--border);display:flex;flex-direction:column;gap:8px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <strong style="font-family:var(--font-display);font-size:14px;">${w.brand}</strong>
+        <span style="padding:3px 9px;border-radius:999px;background:var(--accent);color:var(--accent-fg);font-size:11px;font-weight:700;">버튼 색감</span>
+      </div>
+      <div style="display:flex;gap:5px;">
+        ${item.swatches.map(s => `<div style="flex:1;height:20px;border-radius:5px;background:${s};border:1px solid rgba(128,128,128,0.28);"></div>`).join('')}
+      </div>
     </div>`;
   }
+
+  if (catKey === 'shader') {
+    if (item.mode !== 'none') {
+      return `<div class="${pal.cls}" style="width:100%;height:90px;border-radius:8px;background:var(--bg);color:var(--fg);border:1px solid var(--border);position:relative;overflow:hidden;display:flex;align-items:center;justify-content:center;">
+        <canvas class="drawer-shader-canvas" data-mode="${item.mode}" width="260" height="90" style="position:absolute;inset:0;width:100%;height:100%;"></canvas>
+        <span class="f-mono" style="position:relative;z-index:2;padding:3px 9px;border-radius:999px;background:color-mix(in srgb, var(--surface) 80%, transparent);border:1px solid var(--border);font-size:11px;color:var(--accent);font-weight:700;">LIVE · ${item.mode.toUpperCase()}</span>
+      </div>`;
+    }
+    return `<div class="${pal.cls} ${item.cls}" style="width:100%;height:84px;border-radius:8px;background-color:var(--bg);color:var(--fg);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;">
+      <span style="font-size:12px;font-weight:700;">${item.name}</span>
+    </div>`;
+  }
+
   if (catKey === 'font') {
-    return `<div class="${pal.cls} ${item.cls}" style="margin-top:8px;padding:10px 12px;border-radius:8px;background:var(--bg);color:var(--fg);font-family:var(--font-display);font-weight:var(--display-weight);font-size:16px;">${item.sample}</div>`;
+    return `<div class="${pal.cls} ${item.cls}" style="width:100%;padding:12px;border-radius:8px;background:var(--bg);color:var(--fg);border:1px solid var(--border);text-align:center;">
+      <div style="font-family:var(--font-display);font-weight:var(--display-weight);letter-spacing:var(--display-track);font-size:19px;line-height:1.2;">${item.sample}</div>
+      <div style="font-family:var(--font-body);font-size:11px;color:var(--sub);margin-top:5px;">빛과 여백의 건축 · 012345</div>
+    </div>`;
   }
+
   if (catKey === 'textfx') {
-    return `<div class="${pal.cls} ${fnt.cls} ${item.cls}" style="margin-top:8px;padding:10px 12px;border-radius:8px;background:var(--bg);color:var(--fg);"><div class="f-h3" style="font-size:16px;">시간의 결 <span class="f-accent-word" data-scramble="건축 미학">건축 미학</span></div></div>`;
+    return `<div class="${pal.cls} ${fnt.cls} ${item.cls}" style="width:100%;padding:12px;border-radius:8px;background:var(--bg);color:var(--fg);border:1px solid var(--border);text-align:center;">
+      <div class="f-h2" style="font-size:18px;">${fmtHeadline('시간을 초월한', '건축 미학', item.id)}</div>
+    </div>`;
   }
+
   if (catKey === 'button') {
-    return `<div class="${pal.cls} ${fnt.cls}" style="margin-top:8px;padding:12px;border-radius:8px;background:var(--bg);color:var(--fg);display:flex;justify-content:center;zoom:0.86;">${item.render('인터랙션 테스트')}</div>`;
+    return `<div class="${pal.cls} ${fnt.cls}" style="width:100%;padding:14px 10px;border-radius:8px;background:var(--bg);color:var(--fg);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;zoom:0.9;">
+      ${item.render('버튼 디자인 미리보기')}
+    </div>`;
   }
+
   if (catKey === 'surface') {
-    return `<div class="${pal.cls} ${item.cls}" style="margin-top:8px;padding:8px;border-radius:8px;background:var(--bg);"><div class="f-card" style="padding:10px 12px;font-size:12px;font-weight:700;">${item.id} · 카드 표면 프리뷰</div></div>`;
+    return `<div class="${pal.cls} ${fnt.cls} ${item.cls}" style="width:100%;padding:10px;border-radius:8px;background:var(--bg);color:var(--fg);">
+      <div class="f-card" style="padding:12px 14px;">
+        <div style="font-size:12px;font-weight:700;">${item.name}</div>
+        <div style="font-size:11px;color:var(--sub);margin-top:3px;">카드 테두리·그림자·유리 질감</div>
+      </div>
+    </div>`;
   }
+
   if (catKey === 'imgstyle') {
-    return `<div class="${pal.cls} ${item.cls}" style="margin-top:8px;padding:10px;border-radius:8px;background:var(--bg);display:flex;justify-content:center;"><div class="f-media" style="width:124px;height:74px;"><img src="${IMG.courtyard}" alt="Mask"/></div></div>`;
+    return `<div class="${pal.cls} ${item.cls}" style="width:100%;padding:10px;border-radius:8px;background:var(--bg);border:1px solid var(--border);display:flex;justify-content:center;">
+      <div class="f-media" style="width:156px;height:90px;"><img src="${IMG[w.heroImg]}" alt="${item.name}"/></div>
+    </div>`;
   }
-  if (catKey === 'inputui' && typeof item.demo === 'function') {
-    return `<div class="${pal.cls} ${fnt.cls}" onclick="event.stopPropagation()" style="margin-top:8px;padding:10px;border-radius:8px;background:var(--bg);color:var(--fg);display:flex;justify-content:center;zoom:0.88;">${item.demo()}</div>`;
+
+  if (catKey === 'inputui') {
+    return `<div class="${pal.cls} ${fnt.cls}" style="width:100%;padding:12px 10px;border-radius:8px;background:var(--bg);color:var(--fg);border:1px solid var(--border);display:flex;justify-content:center;zoom:0.86;">
+      ${item.demo()}
+    </div>`;
   }
+
+  if (catKey === 'cursor') {
+    const badgeVisual = item.mode === 'coords'
+      ? `<span class="f-mono" style="padding:3px 8px;border-radius:4px;background:#090A0D;color:#fff;font-size:10px;">+ X:240 Y:88</span>`
+      : item.mode === 'pill'
+      ? `<span class="f-mono" style="padding:4px 12px;border-radius:999px;background:var(--fg);color:var(--bg);font-size:10px;font-weight:700;">EXPLORE ↗</span>`
+      : item.mode === 'diff'
+      ? `<span style="width:34px;height:34px;border-radius:999px;background:#FFFFFF;mix-blend-mode:difference;display:inline-block;"></span>`
+      : item.mode === 'halo'
+      ? `<span style="width:66px;height:66px;border-radius:999px;background:radial-gradient(circle,rgba(212,163,89,0.5) 0%,transparent 70%);display:inline-block;"></span>`
+      : item.mode === 'trail'
+      ? `<span style="display:inline-flex;align-items:center;gap:5px;"><span style="width:6px;height:6px;border-radius:99px;background:#FDE68A;opacity:0.4;"></span><span style="width:9px;height:9px;border-radius:99px;background:#F59E0B;opacity:0.7;"></span><span style="width:18px;height:18px;border-radius:99px;border:1.5px solid #D4A359;"></span></span>`
+      : `<span style="width:36px;height:36px;border-radius:999px;border:1.5px solid var(--accent);display:inline-flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;">VIEW</span>`;
+    return `<div class="${pal.cls}" style="width:100%;height:84px;border-radius:8px;background:var(--bg);color:var(--fg);border:1px solid var(--border);display:flex;align-items:center;justify-content:space-around;padding:10px;">
+      <span style="font-size:12px;font-weight:700;">마우스 포인터 연출</span>
+      ${badgeVisual}
+    </div>`;
+  }
+
+  if (catKey === 'motion') {
+    const animStyle = item.demoAnim ? `animation:${item.demoAnim} 3s cubic-bezier(0.16,1,0.3,1) infinite;` : '';
+    return `<div class="${pal.cls}" style="width:100%;height:88px;border-radius:8px;background:var(--bg);color:var(--fg);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;overflow:hidden;">
+      <div style="padding:8px 14px;border-radius:8px;background:var(--surface);border:1px solid var(--border);display:flex;align-items:center;gap:9px;${animStyle}">
+        <span style="width:10px;height:10px;border-radius:999px;background:var(--accent);"></span>
+        <span style="font-size:12px;font-weight:700;">${item.name}</span>
+      </div>
+    </div>`;
+  }
+
   if (catKey === 'badge') {
-    return `<div class="${pal.cls}" style="margin-top:8px;padding:10px 12px;border-radius:8px;background:var(--bg);color:var(--fg);"><span class="${item.cls}">ARCHIVE 2026</span></div>`;
+    return `<div class="${pal.cls}" style="width:100%;padding:14px;border-radius:8px;background:var(--bg);color:var(--fg);border:1px solid var(--border);display:flex;justify-content:center;">
+      <span class="${item.cls}">${w.eyebrow}</span>
+    </div>`;
   }
-  return '';
+
+  if (catKey === 'preloader') {
+    return `<div class="${pal.cls}" style="width:100%;height:82px;border-radius:8px;background:var(--bg);color:var(--fg);border:1px solid var(--border);position:relative;overflow:hidden;display:flex;align-items:center;justify-content:center;">
+      <div style="position:absolute;top:0;left:0;height:4px;width:68%;background:var(--accent);"></div>
+      <span style="font-size:12px;font-weight:700;">${item.mode.includes('Curtain') ? '🎬 풀스크린 오프닝 커튼' : '📏 스크롤 진행 인디케이터'}</span>
+    </div>`;
+  }
+
+  if (catKey === 'widget') {
+    const raw = item.render(w, ctx);
+    if (!raw) {
+      return `<div class="${pal.cls}" style="width:100%;height:78px;border-radius:8px;background:var(--bg);color:var(--sub);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:12px;">하단 고정바 숨김 (깔끔한 화면)</div>`;
+    }
+    return `<div class="${pal.cls} ${fnt.cls}" style="width:100%;height:88px;border-radius:8px;background:var(--bg);color:var(--fg);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;overflow:hidden;padding:6px;">
+      <div style="zoom:0.56;width:100%;">${raw.replace(/position:sticky;/g, 'position:relative;')}</div>
+    </div>`;
+  }
+
+  /* 14 ~ 26: Live Scaled Full-Page Section Thumbnail! */
+  const secHTML = typeof item.render === 'function' ? item.render(w, ctx) : '';
+  return `<div class="st-drawer-sec-shell ${pal.cls} ${fnt.cls} ${tfx.cls} ${srf.cls} ${imgst.cls} ${inp.cls || ''}">
+    ${secHTML
+      ? `<div class="st-drawer-sec-scale">${secHTML}</div>`
+      : `<div style="height:100%;display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--sub);">여백/숨김 모드</div>`}
+  </div>`;
+}
+
+function initDrawerShaders(container) {
+  if (drawerShaderRAF) { cancelAnimationFrame(drawerShaderRAF); drawerShaderRAF = null; }
+  if (!container || typeof container.querySelectorAll !== 'function' || typeof requestAnimationFrame !== 'function') return;
+  const cvs = Array.from(container.querySelectorAll('.drawer-shader-canvas'));
+  if (!cvs.length) return;
+  const pal = getAsset('palette', state.equipped.palette);
+  const accentHex = pal.swatches[2] || '#8C5A32';
+  const items = cvs.map(cv => ({
+    cv,
+    ctx: typeof cv.getContext === 'function' ? cv.getContext('2d') : null,
+    mode: cv.dataset.mode,
+    motes: Array.from({ length: 14 }, (_, i) => ({ x: (i * 47) % 260, y: (i * 29) % 90, vx: 0.22, vy: -0.18, r: 1.3 }))
+  })).filter(s => s.ctx);
+  if (!items.length) return;
+  let t = 0;
+  function tick() {
+    if (state.mode !== 'builder' || !state.sidebarOpen) return;
+    t += 0.022;
+    items.forEach(s => drawShaderFrame(s.ctx, s.cv.width, s.cv.height, s.mode, accentHex, t, s.motes, 130, 45));
+    drawerShaderRAF = requestAnimationFrame(tick);
+  }
+  drawerShaderRAF = requestAnimationFrame(tick);
+}
+
+function renderDrawerCardsOnly() {
+  const headEl = document.getElementById('st-drawer-cat-head');
+  const cardsEl = document.getElementById('st-drawer-cards');
+  const hiddenBar = document.getElementById('st-hidden-secs-bar');
+  if (!cardsEl) return;
+
+  const q = state.drawerQuery.trim().toLowerCase();
+  const activeMeta = CATEGORIES.find(c => c.key === state.activeCat) || CATEGORIES[0];
+
+  const entries = [];
+  if (q) {
+    CATEGORIES.forEach(c => {
+      (VAULT[c.key] || []).forEach(item => {
+        const hay = `${item.id} ${item.name} ${item.desc} ${c.name} ${c.shortName}`.toLowerCase();
+        if (hay.includes(q)) entries.push({ cat: c, item });
+      });
+    });
+  } else {
+    (VAULT[activeMeta.key] || []).forEach(item => entries.push({ cat: activeMeta, item }));
+  }
+
+  if (headEl) {
+    headEl.innerHTML = q
+      ? `<span>🔍 검색 결과 (${entries.length}개)</span><button type="button" onclick="setDrawerSearch('');document.getElementById('drawer-search-input').value='';" style="background:transparent;border:none;color:#FFF;font-size:11px;cursor:pointer;font-weight:700;">초기화 ✕</button>`
+      : `<span>${activeMeta.icon} ${activeMeta.shortName} (${entries.length}종)</span><span>⠿ 오른쪽으로 드래그!</span>`;
+  }
+
+  cardsEl.innerHTML = entries.length ? entries.map(({ cat, item }) => {
+    const isEq = state.equipped[cat.key] === item.id && (cat.group !== 'section' || state.secEnabled[cat.key]);
+    return `<div class="st-drag-card ${isEq ? 'is-equipped' : ''}" data-cat="${cat.key}" data-id="${item.id}">
+      <div class="st-drag-card-head">
+        <div class="st-drag-grip" title="${item.name}">
+          <span class="st-drag-grip-dots">⠿</span>
+          <span>${q ? `[${cat.shortName}] ` : ''}${item.name}</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:4px;flex-shrink:0;">
+          <button type="button" class="st-no-drag" onclick="event.stopPropagation();openSingleAssetCode('${cat.key}','${item.id}')" style="background:rgba(255,255,255,0.08);border:none;color:#CBD5E1;font-family:'JetBrains Mono',monospace;font-size:10.5px;padding:2px 6px;border-radius:4px;cursor:pointer;" title="이 요소만 단독 코드 보기">&lt;/&gt;</button>
+          <span style="font-size:10.5px;padding:2px 7px;border-radius:999px;font-weight:800;background:${isEq ? '#38BDF8' : 'rgba(255,255,255,0.08)'};color:${isEq ? '#04131D' : '#94A3B8'};">${isEq ? '✓ 적용중' : '끌어서 놓기'}</span>
+        </div>
+      </div>
+      <div class="st-drawer-stage">
+        ${renderDrawerVisualStage(cat.key, item)}
+      </div>
+    </div>`;
+  }).join('') : `<div style="padding:36px 14px;text-align:center;color:#94A3B8;font-size:12.5px;">일치하는 디자인 요소가 없습니다.</div>`;
+
+  if (hiddenBar) {
+    const hiddenKeys = state.secOrder.filter(k => !state.secEnabled[k]);
+    if (hiddenKeys.length > 0) {
+      hiddenBar.style.display = 'flex';
+      hiddenBar.innerHTML = `<span style="font-size:11px;color:#94A3B8;font-weight:700;width:100%;">숨긴 섹션 다시 넣기:</span>` +
+        hiddenKeys.map(k => {
+          const m = CATEGORIES.find(c => c.key === k);
+          return `<button type="button" onclick="restoreHiddenSection('${k}')" class="st-pill-btn" style="padding:3px 8px;font-size:11px;">+ ${m.icon} ${m.shortName}</button>`;
+        }).join('');
+    } else {
+      hiddenBar.style.display = 'none';
+    }
+  }
+
+  initDrawerShaders(cardsEl);
 }
 
 function renderSidebarBody() {
-  const container = document.getElementById('st-side-body');
-  if (!container) return;
-
-  if (state.sideTab === 'slots') {
+  const railEl = document.getElementById('st-cat-rail');
+  if (railEl) {
     const globalCats = CATEGORIES.filter(c => c.group === 'global');
     const secCats = CATEGORIES.filter(c => c.group === 'section');
-    const activeMeta = CATEGORIES.find(c => c.key === state.activeCat) || CATEGORIES[0];
-    const activeList = VAULT[activeMeta.key] || [];
-    const eqId = state.equipped[activeMeta.key];
-
-    container.innerHTML = `
-      <div class="st-cat-group-label">
-        <span>그룹 A · 단위 에셋·서체·물리 (13)</span>
-        <span class="f-mono" style="font-size:12px;color:#64748B;">134종</span>
-      </div>
-      <div class="st-slot-grid">
-        ${globalCats.map(c => {
-          const eq = getAsset(c.key, state.equipped[c.key]);
-          return `<button type="button" onclick="selectSlotCategory('${c.key}')" class="st-slot-chip ${state.activeCat===c.key?'is-active':''}">
-            <div class="st-slot-top"><span>${c.num}. ${c.name}</span></div>
-            <div class="st-slot-sub">${eq.name}</div>
-          </button>`;
-        }).join('')}
-      </div>
-
-      <div class="st-cat-group-label" style="padding-top:4px;">
-        <span>그룹 B · 풀페이지 섹션 블록 (13)</span>
-        <span class="f-mono" style="font-size:12px;color:#64748B;">118종</span>
-      </div>
-      <div class="st-slot-grid">
-        ${secCats.map(c => {
-          const eq = getAsset(c.key, state.equipped[c.key]);
-          return `<button type="button" onclick="selectSlotCategory('${c.key}')" class="st-slot-chip ${state.activeCat===c.key?'is-active':''}">
-            <div class="st-slot-top"><span>${c.num}. ${c.name}</span></div>
-            <div class="st-slot-sub">${eq.name}</div>
-          </button>`;
-        }).join('')}
-      </div>
-
-      <div class="st-picker-head">
-        <div style="font-size:12px;font-weight:700;color:#F8FAFC;">${activeMeta.num}. ${activeMeta.name} (${activeList.length}종)</div>
-        <div style="display:flex;gap:4px;">
-          <button type="button" onclick="setStudioMode('vault');setVaultFilter('${activeMeta.key}')" class="st-pill-btn" style="padding:3px 8px;" title="크게 비교하기">확대비교</button>
-          <button type="button" onclick="cycleSlot('${activeMeta.key}', -1)" class="st-pill-btn" style="padding:3px 9px;">‹</button>
-          <button type="button" onclick="cycleSlot('${activeMeta.key}', 1)" class="st-pill-btn" style="padding:3px 9px;">›</button>
-        </div>
-      </div>
-
-      <div class="st-picker-list">
-        ${activeList.map(item => {
-          const isEq = item.id === eqId;
-          return `<div onclick="equipAsset('${activeMeta.key}', '${item.id}')" class="st-asset-item ${isEq?'is-equipped':''}">
-            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
-              <div style="font-size:12px;font-weight:700;color:#F8FAFC;">${item.name}</div>
-              <div style="display:flex;align-items:center;gap:5px;flex-shrink:0;">
-                <button type="button" onclick="event.stopPropagation();openSingleAssetCode('${activeMeta.key}','${item.id}')" style="background:rgba(255,255,255,0.09);border:none;color:#E2E8F0;font-family:'JetBrains Mono',monospace;font-size:12px;padding:3px 7px;border-radius:5px;cursor:pointer;" title="완전 동작 단독 코드 추출">&lt;/&gt;</button>
-                <span class="f-mono" style="font-size:12px;padding:2px 7px;border-radius:5px;background:${isEq?'#F8FAFC':'rgba(255,255,255,0.07)'};color:${isEq?'#090A0D':'#94A3B8'};font-weight:700;">${isEq?'장착됨':item.id}</span>
-              </div>
-            </div>
-            <div style="font-size:12px;color:#8A94A6;margin-top:4px;line-height:1.45;">${item.desc}</div>
-            ${renderMiniStagePreview(activeMeta.key, item)}
-          </div>`;
-        }).join('')}
-      </div>
+    railEl.innerHTML = `
+      <div class="st-rail-group-lbl">스타일·부품</div>
+      ${globalCats.map(c => `
+        <button type="button" onclick="selectSlotCategory('${c.key}')" class="st-rail-btn ${state.activeCat === c.key && !state.drawerQuery ? 'is-active' : ''}" title="${c.name}">
+          <span class="st-rail-ico">${c.icon}</span>
+          <span>${c.shortName}</span>
+        </button>
+      `).join('')}
+      <div class="st-rail-group-lbl" style="margin-top:8px;">페이지 섹션</div>
+      ${secCats.map(c => `
+        <button type="button" onclick="selectSlotCategory('${c.key}')" class="st-rail-btn ${state.activeCat === c.key && !state.drawerQuery ? 'is-active' : ''}" style="opacity:${state.secEnabled[c.key] ? '1' : '0.45'};" title="${c.name}">
+          <span class="st-rail-ico">${c.icon}</span>
+          <span>${c.shortName}</span>
+        </button>
+      `).join('')}
     `;
-    return;
+  }
+  renderDrawerCardsOnly();
+}
+
+/* ==========================================================================
+   60FPS POINTER DRAG & DROP ENGINE (Drawer -> Homepage + Section Reordering!)
+   ========================================================================== */
+function getMatchingCanvasSelector(catKey) {
+  if (catKey === 'button') return '#hp-root .f-btn';
+  if (catKey === 'surface') return '#hp-root .f-card';
+  if (catKey === 'imgstyle') return '#hp-root .f-media';
+  if (catKey === 'font' || catKey === 'textfx') return '#hp-root .f-h1, #hp-root .f-h2';
+  if (catKey === 'inputui') return '#hp-root .f-input, #hp-root .f-switch';
+  if (catKey === 'badge') return '#hp-root .f-bdg';
+  return '';
+}
+
+function previewGlobalClassOnRoot(catKey, previewId) {
+  const root = document.getElementById('hp-root');
+  if (!root) return;
+  const classSlots = ['palette', 'font', 'textfx', 'surface', 'imgstyle'];
+  if (!classSlots.includes(catKey)) return;
+  (VAULT[catKey] || []).forEach(it => {
+    if (it.cls) it.cls.split(/\s+/).forEach(c => c && root.classList.remove(c));
+  });
+  const target = getAsset(catKey, previewId);
+  if (target?.cls) {
+    target.cls.split(/\s+/).forEach(c => c && root.classList.add(c));
+  }
+}
+
+function clearAllDropHighlights() {
+  document.getElementById('canvas-frame')?.classList.remove('is-drop-hot');
+  const line = document.getElementById('st-sec-drop-line');
+  if (line) line.style.display = 'none';
+  document.querySelectorAll?.('.is-drop-target-el').forEach(el => el.classList.remove('is-drop-target-el'));
+  document.querySelectorAll?.('.is-sec-replace-target').forEach(el => el.classList.remove('is-sec-replace-target'));
+}
+
+function computeSectionDropTarget(clientY, draggedCatKey, isReorderOnly = false) {
+  const frame = document.getElementById('canvas-frame');
+  if (!frame || typeof frame.querySelectorAll !== 'function') return null;
+  const secs = Array.from(frame.querySelectorAll('.f-sec-wrap[data-sec-key]'));
+  if (!secs.length) return { mode: 'replace', refSecKey: draggedCatKey, pos: 'after', lineY: 140 };
+
+  for (let i = 0; i < secs.length; i++) {
+    const el = secs[i];
+    const r = el.getBoundingClientRect();
+    const sk = el.dataset.secKey;
+    if (clientY >= r.top && clientY <= r.bottom) {
+      const rel = (clientY - r.top) / Math.max(1, r.height);
+      if (!isReorderOnly && sk === draggedCatKey && rel > 0.18 && rel < 0.82) {
+        return { mode: 'replace', el, refSecKey: sk };
+      }
+      const pos = rel < 0.5 ? 'before' : 'after';
+      return { mode: 'insert', el, refSecKey: sk, pos, lineY: pos === 'before' ? r.top : r.bottom };
+    }
+  }
+  const firstR = secs[0].getBoundingClientRect();
+  if (clientY < firstR.top) {
+    return { mode: 'insert', el: secs[0], refSecKey: secs[0].dataset.secKey, pos: 'before', lineY: firstR.top };
+  }
+  const last = secs[secs.length - 1];
+  const lastR = last.getBoundingClientRect();
+  return { mode: 'insert', el: last, refSecKey: last.dataset.secKey, pos: 'after', lineY: lastR.bottom };
+}
+
+function placeKeyRelative(orderArr, movingKey, refKey, pos) {
+  if (!refKey || movingKey === refKey) return orderArr;
+  const clean = orderArr.filter(k => k !== movingKey);
+  const idx = clean.indexOf(refKey);
+  if (idx < 0) {
+    clean.push(movingKey);
+    return clean;
+  }
+  clean.splice(pos === 'before' ? idx : idx + 1, 0, movingKey);
+  return clean;
+}
+
+let activePointerDrag = null;
+
+function startSectionReorderDrag(ev, secKey) {
+  if (ev.button && ev.button !== 0) return;
+  ev.preventDefault();
+  ev.stopPropagation();
+  const meta = CATEGORIES.find(c => c.key === secKey);
+  const eq = getAsset(secKey, state.equipped[secKey]);
+  activePointerDrag = {
+    kind: 'reorder',
+    catKey: secKey,
+    assetId: eq.id,
+    meta,
+    item: eq,
+    startX: ev.clientX,
+    startY: ev.clientY,
+    moved: false,
+    secTarget: null
+  };
+}
+
+function initDragAndDropSystem() {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return;
+
+  const drawerCards = document.getElementById('st-drawer-cards');
+  if (drawerCards) {
+    drawerCards.addEventListener('dragstart', (e) => e.preventDefault());
+    drawerCards.addEventListener('pointerdown', (e) => {
+      if (e.button && e.button !== 0) return;
+      if (e.target.closest?.('.st-no-drag')) return;
+      const card = e.target.closest?.('.st-drag-card');
+      if (!card) return;
+      const catKey = card.dataset.cat;
+      const assetId = card.dataset.id;
+      const meta = CATEGORIES.find(c => c.key === catKey);
+      const item = getAsset(catKey, assetId);
+      if (!meta || !item) return;
+
+      activePointerDrag = {
+        kind: 'asset',
+        catKey,
+        assetId,
+        origAssetId: state.equipped[catKey],
+        meta,
+        item,
+        pointerType: e.pointerType || 'mouse',
+        startX: e.clientX,
+        startY: e.clientY,
+        moved: false,
+        overCanvas: false,
+        secTarget: null
+      };
+    });
   }
 
-  if (state.sideTab === 'composer') {
-    container.innerHTML = `
-      <div style="padding:14px 12px;">
-        <div style="font-size:12px;color:#94A3B8;margin-bottom:12px;line-height:1.5;">
-          13개 풀페이지 섹션의 배치 순서를 위·아래(↑↓)로 변경하거나 ON/OFF 할 수 있습니다.
-        </div>
-        <div style="display:flex;flex-direction:column;gap:7px;">
-          ${state.secOrder.map((secKey, idx) => {
-            const meta = CATEGORIES.find(c => c.key === secKey);
-            const on = state.secEnabled[secKey];
-            const eq = getAsset(secKey, state.equipped[secKey]);
-            return `<div style="padding:10px 11px;border-radius:9px;background:#14171F;border:1px solid rgba(255,255,255,0.08);opacity:${on?1:0.48};">
-              <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;">
-                <div style="font-size:12px;font-weight:700;color:#F8FAFC;cursor:pointer;" onclick="document.getElementById('sec-${secKey}')?.scrollIntoView({behavior:'smooth'})">${idx+1}. ${meta.name}</div>
-                <div style="display:flex;gap:4px;">
-                  <button type="button" onclick="moveSectionOrder('${secKey}',-1)" class="st-pill-btn" style="padding:2px 7px;">↑</button>
-                  <button type="button" onclick="moveSectionOrder('${secKey}',1)" class="st-pill-btn" style="padding:2px 7px;">↓</button>
-                  <button type="button" onclick="toggleSectionVisible('${secKey}')" class="st-pill-btn ${on?'is-active':''}" style="padding:2px 8px;">${on?'ON':'OFF'}</button>
-                </div>
-              </div>
-              <div style="display:flex;justify-content:space-between;align-items:center;margin-top:7px;font-size:12px;color:#8A94A6;">
-                <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${eq.name}</span>
-                <div style="display:flex;gap:4px;flex-shrink:0;">
-                  <button type="button" onclick="cycleSlot('${secKey}',-1)" class="st-pill-btn" style="padding:1px 7px;">‹</button>
-                  <button type="button" onclick="cycleSlot('${secKey}',1)" class="st-pill-btn" style="padding:1px 7px;">›</button>
-                </div>
-              </div>
-            </div>`;
-          }).join('')}
-        </div>
-      </div>
-    `;
-    return;
-  }
+  window.addEventListener('pointermove', (e) => {
+    if (!activePointerDrag) return;
+    const d = activePointerDrag;
+    const dx = e.clientX - d.startX;
+    const dy = e.clientY - d.startY;
 
-  container.innerHTML = `
-    <div style="padding:16px 14px;display:flex;flex-direction:column;gap:18px;">
-      <div>
-        <div style="display:flex;justify-content:space-between;font-size:12px;font-weight:700;margin-bottom:8px;">
-          <span>모서리 곡률 (Border Radius)</span>
-          <span class="f-mono">${state.tokens.radius}px</span>
-        </div>
-        <input type="range" min="0" max="28" value="${state.tokens.radius}" oninput="updateToken('radius', this.value)" style="width:100%;accent-color:#F8FAFC;cursor:pointer;" />
-      </div>
+    if (!d.moved) {
+      if (Math.hypot(dx, dy) < 6) return;
+      if (d.pointerType === 'touch' && Math.abs(dy) > Math.abs(dx) * 1.3) {
+        activePointerDrag = null;
+        return;
+      }
+      d.moved = true;
+      document.body.classList.add('is-dragging');
+      if (d.kind === 'asset' && d.meta.group === 'global') {
+        const sel = getMatchingCanvasSelector(d.catKey);
+        if (sel) document.querySelectorAll(sel).forEach(el => el.classList.add('is-drop-target-el'));
+      }
+    }
 
-      <div>
-        <div style="font-size:12px;font-weight:700;margin-bottom:8px;">섹션 여백 호흡 (Vertical Rhythm)</div>
-        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;">
-          ${[['compact','조밀함'],['balanced','스탠다드'],['editorial','넓은 여백']].map(([v, lbl]) => `
-            <button type="button" onclick="updateToken('density','${v}')" class="st-pill-btn ${state.tokens.density===v?'is-active':''}" style="justify-content:center;">${lbl}</button>
-          `).join('')}
-        </div>
-      </div>
+    const ghost = document.getElementById('st-drag-ghost');
+    const frame = document.getElementById('canvas-frame');
+    const dropBanner = document.getElementById('st-drop-banner');
+    const dropLine = document.getElementById('st-sec-drop-line');
+    const dropLineLbl = document.getElementById('st-sec-drop-label');
+    if (!frame) return;
 
-      <div>
-        <div style="display:flex;justify-content:space-between;font-size:12px;font-weight:700;margin-bottom:8px;">
-          <span>35mm 아날로그 필름 그레인 질감</span>
-          <span class="f-mono">${Math.round(state.tokens.grain * 1000) / 10}%</span>
-        </div>
-        <input type="range" min="0" max="0.09" step="0.005" value="${state.tokens.grain}" oninput="updateToken('grain', this.value)" style="width:100%;accent-color:#F8FAFC;cursor:pointer;" />
-      </div>
+    const fr = frame.getBoundingClientRect();
+    const insideFrame = e.clientX >= fr.left && e.clientX <= fr.right && e.clientY >= fr.top && e.clientY <= fr.bottom;
+    d.overCanvas = insideFrame;
 
-      <div>
-        <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;font-weight:700;">
-          <span>커스텀 포인트 컬러 오버라이드</span>
-          <input type="color" value="${state.tokens.customAccent || '#8C5A32'}" oninput="updateToken('customAccent', this.value)" style="width:32px;height:26px;border:none;background:transparent;cursor:pointer;" />
-        </div>
-      </div>
+    // Smooth auto-scroll when dragging near top or bottom of canvas!
+    if (insideFrame) {
+      if (e.clientY < fr.top + 64) frame.scrollTop -= 11;
+      else if (e.clientY > fr.bottom - 64) frame.scrollTop += 11;
+    }
 
-      <div style="padding-top:12px;border-top:1px solid rgba(255,255,255,0.08);display:flex;justify-content:space-between;align-items:center;">
-        <span style="font-size:12px;font-weight:600;">섹션 마우스오버 빠른 교체 알약</span>
-        <button type="button" onclick="updateToken('guidesOn', !state.guidesOn)" class="st-pill-btn ${state.guidesOn?'is-active':''}">${state.guidesOn?'표시 중':'숨김'}</button>
-      </div>
-    </div>
-  `;
+    if (ghost) {
+      ghost.style.display = 'flex';
+      ghost.style.transform = `translate3d(${e.clientX + 14}px, ${e.clientY + 14}px, 0) rotate(-1.5deg)`;
+      ghost.classList.toggle('is-ready', insideFrame);
+      const statusTxt = d.kind === 'reorder'
+        ? (insideFrame ? '↕ 원하는 위치에서 마우스를 놓으세요!' : '캔버스 안에서 위아래로 이동하세요')
+        : (insideFrame ? '🎯 여기서 손 떼면 바로 적용!' : '👉 오른쪽 홈페이지 위로 끌어다 놓으세요');
+      ghost.innerHTML = `
+        <span class="st-drag-ghost-status">${statusTxt}</span>
+        <div style="font-size:13px;font-weight:800;color:#F8FAFC;">${d.meta.icon} ${d.item.name}</div>
+        <div style="font-size:11px;color:#94A3B8;">${d.meta.shortName}</div>
+      `;
+    }
+
+    // Highlight logic on Homepage
+    document.querySelectorAll?.('.is-sec-replace-target').forEach(el => el.classList.remove('is-sec-replace-target'));
+    if (dropLine) dropLine.style.display = 'none';
+
+    if (!insideFrame) {
+      frame.classList.remove('is-drop-hot');
+      if (d.kind === 'asset' && d.meta.group === 'global') {
+        previewGlobalClassOnRoot(d.catKey, d.origAssetId);
+      }
+      d.secTarget = null;
+      return;
+    }
+
+    if (d.kind === 'reorder') {
+      const st = computeSectionDropTarget(e.clientY, d.catKey, true);
+      d.secTarget = st;
+      if (st && dropLine && dropLineLbl) {
+        dropLine.style.display = 'flex';
+        dropLine.style.top = `${Math.max(fr.top + 6, Math.min(fr.bottom - 6, st.lineY))}px`;
+        dropLine.style.left = `${fr.left + 20}px`;
+        dropLine.style.width = `${fr.width - 40}px`;
+        dropLineLbl.textContent = `↕ 여기에 [${d.meta.icon} ${d.meta.shortName}] 섹션 이동`;
+      }
+    } else if (d.meta.group === 'global') {
+      frame.classList.add('is-drop-hot');
+      if (dropBanner) dropBanner.textContent = `✨ 손 떼면 [${d.meta.icon} ${d.meta.shortName}: ${d.item.name}] 즉시 적용!`;
+      previewGlobalClassOnRoot(d.catKey, d.assetId);
+    } else {
+      frame.classList.add('is-drop-hot');
+      const st = computeSectionDropTarget(e.clientY, d.catKey, false);
+      d.secTarget = st;
+      if (st?.mode === 'replace' && st.el) {
+        if (dropBanner) dropBanner.textContent = `🔄 손 떼면 [${d.meta.shortName}] 디자인이 "${d.item.name}"(으)로 교체됩니다!`;
+        st.el.dataset.dropLabel = `🔄 놓으면 [${d.item.name}] 디자인으로 교체!`;
+        st.el.classList.add('is-sec-replace-target');
+      } else if (st && dropLine && dropLineLbl) {
+        if (dropBanner) dropBanner.textContent = `➕ 손 떼면 선택한 위치에 [${d.meta.shortName}: ${d.item.name}] 배치!`;
+        dropLine.style.display = 'flex';
+        dropLine.style.top = `${Math.max(fr.top + 6, Math.min(fr.bottom - 6, st.lineY))}px`;
+        dropLine.style.left = `${fr.left + 20}px`;
+        dropLine.style.width = `${fr.width - 40}px`;
+        dropLineLbl.textContent = `➕ 여기에 [${d.meta.icon} ${d.meta.shortName}: ${d.item.name}] 배치하기`;
+      }
+    }
+  });
+
+  const finishPointerDrag = () => {
+    if (!activePointerDrag) return;
+    const d = activePointerDrag;
+    activePointerDrag = null;
+
+    document.body.classList.remove('is-dragging');
+    const ghost = document.getElementById('st-drag-ghost');
+    if (ghost) ghost.style.display = 'none';
+    clearAllDropHighlights();
+
+    // Simple click without dragging -> also equip immediately!
+    if (!d.moved) {
+      if (d.kind === 'asset') {
+        pushUndoSnapshot();
+        equipAsset(d.catKey, d.assetId);
+      }
+      return;
+    }
+
+    if (!d.overCanvas) {
+      if (d.kind === 'asset' && d.meta.group === 'global') {
+        previewGlobalClassOnRoot(d.catKey, d.origAssetId);
+      }
+      return;
+    }
+
+    if (d.kind === 'reorder') {
+      if (d.secTarget?.refSecKey && d.secTarget.refSecKey !== d.catKey) {
+        pushUndoSnapshot();
+        state.secOrder = placeKeyRelative(state.secOrder, d.catKey, d.secTarget.refSecKey, d.secTarget.pos);
+        renderSidebarBody();
+        renderLiveWebsite();
+        setTimeout(() => {
+          const movedEl = document.getElementById('sec-' + d.catKey);
+          movedEl?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          movedEl?.classList.add('is-just-applied');
+        }, 40);
+        showStudioToast(`↕ [${d.meta.shortName}] 섹션 위치를 이동했습니다!`);
+      }
+      return;
+    }
+
+    // Restore original before taking Undo snapshot!
+    if (d.meta.group === 'global') {
+      previewGlobalClassOnRoot(d.catKey, d.origAssetId);
+    }
+    pushUndoSnapshot();
+
+    if (d.meta.group === 'section') {
+      state.secEnabled[d.catKey] = true;
+      if (d.secTarget?.mode === 'insert' && d.secTarget.refSecKey && d.secTarget.refSecKey !== d.catKey) {
+        state.secOrder = placeKeyRelative(state.secOrder, d.catKey, d.secTarget.refSecKey, d.secTarget.pos);
+      }
+    }
+    equipAsset(d.catKey, d.assetId);
+  };
+
+  window.addEventListener('pointerup', finishPointerDrag);
+  window.addEventListener('pointercancel', finishPointerDrag);
+
+  // Smart Click-on-Homepage Sync: clicking a generic CTA button or badge opens its category in Left Drawer!
+  document.getElementById('website-mount')?.addEventListener('click', (e) => {
+    if (state.inlineEdit || state.presentation) return;
+    if (e.target.closest?.('.f-sec-pill')) return;
+    const btnEl = e.target.closest?.('.f-btn');
+    if (btnEl && !btnEl.getAttribute('onclick')) {
+      focusDrawerCategory('button');
+      return;
+    }
+    const bdgEl = e.target.closest?.('.f-bdg');
+    if (bdgEl && !bdgEl.getAttribute('onclick')) {
+      focusDrawerCategory('badge');
+    }
+  });
 }
 
 /* ==========================================================================
@@ -531,10 +1030,12 @@ function makeSectionHoverPill(secKey) {
   const meta = CATEGORIES.find(c => c.key === secKey);
   const eq = getAsset(secKey, state.equipped[secKey]);
   return `<div class="f-sec-pill" contenteditable="false">
-    <button type="button" onclick="cycleSlot('${secKey}', -1, event)">‹</button>
-    <span style="padding:0 6px;">${meta.name} · ${eq.name}</span>
-    <button type="button" onclick="cycleSlot('${secKey}', 1, event)">›</button>
-    <button type="button" onclick="openSingleAssetCode('${secKey}', '${eq.id}')">&lt;/&gt;</button>
+    <button type="button" onpointerdown="startSectionReorderDrag(event, '${secKey}')" style="cursor:grab;background:rgba(56,189,248,0.22);color:#BAE6FD;" title="마우스로 잡고 위아래로 끌어서 섹션 순서 변경">⠿ 끌어서 이동</button>
+    <button type="button" onclick="focusDrawerCategory('${secKey}')" title="왼쪽 서랍에서 이 섹션의 다른 디자인 보기">${meta.icon} ${meta.shortName} 바꾸기</button>
+    <button type="button" onclick="pushUndoSnapshot();cycleSlot('${secKey}', -1, event)" title="이전 디자인">‹</button>
+    <button type="button" onclick="pushUndoSnapshot();cycleSlot('${secKey}', 1, event)" title="다음 디자인">›</button>
+    <button type="button" onclick="openSingleAssetCode('${secKey}', '${eq.id}')" title="이 섹션 코드만 보기">&lt;/&gt;</button>
+    <button type="button" onclick="hideSectionWithUndo('${secKey}')" style="background:rgba(239,68,68,0.22);color:#FCA5A5;" title="이 섹션 숨기기">✕</button>
   </div>`;
 }
 
@@ -642,7 +1143,7 @@ function renderLiveWebsite() {
       const mod = getAsset(secKey, state.equipped[secKey]);
       const html = mod.render(w, ctx);
       if (!html) return '';
-      return `<div id="sec-${secKey}" class="f-sec-wrap">
+      return `<div id="sec-${secKey}" data-sec-key="${secKey}" class="f-sec-wrap">
         ${makeSectionHoverPill(secKey)}
         ${html}
       </div>`;
@@ -1556,7 +2057,7 @@ function renderVaultView(skipToolbarRebuild = false) {
               <p style="margin:5px 0 0;font-size:12px;color:#8A94A6;line-height:1.5;">${item.desc}</p>
             </div>
             <div style="display:flex;gap:8px;padding-top:10px;border-top:1px solid rgba(255,255,255,0.07);">
-              <button type="button" onclick="equipAsset('${c.key}','${item.id}', true)" class="st-pill-btn is-primary" style="flex:1;justify-content:center;">홈페이지에 장착 →</button>
+              <button type="button" onclick="pushUndoSnapshot();equipAsset('${c.key}','${item.id}', true)" class="st-pill-btn is-primary" style="flex:1;justify-content:center;">홈페이지에 바로 적용 →</button>
               <button type="button" onclick="openSingleAssetCode('${c.key}','${item.id}')" class="st-pill-btn">&lt;/&gt; 단독 코드</button>
             </div>
           </div>
@@ -2066,12 +2567,16 @@ function downloadExportHTML() {
 function downloadStudioSelfHTML() {
   if (typeof Blob === 'undefined' || !document.documentElement) return;
   const clone = document.documentElement.cloneNode(true);
-  ['website-mount', 'st-subbar', 'st-side-body', 'vault-toolbar', 'vault-cats-bar', 'vault-cards-grid'].forEach(id => {
+  [
+    'website-mount', 'st-subbar', 'st-cat-rail', 'st-drawer-cat-head',
+    'st-drawer-cards', 'st-hidden-secs-bar', 'st-tune-popover',
+    'vault-toolbar', 'vault-cats-bar', 'vault-cards-grid'
+  ].forEach(id => {
     const el = clone.querySelector ? clone.querySelector('#' + id) : null;
     if (el) el.innerHTML = '';
   });
-  clone.querySelectorAll?.('.is-open, .is-visible').forEach(el => {
-    el.classList.remove('is-open', 'is-visible');
+  clone.querySelectorAll?.('.is-open, .is-visible, .is-drop-hot, .is-dragging').forEach(el => {
+    el.classList.remove('is-open', 'is-visible', 'is-drop-hot', 'is-dragging');
   });
   const appEl = clone.querySelector ? clone.querySelector('#studio-app') : null;
   if (appEl) {
@@ -2083,12 +2588,12 @@ function downloadStudioSelfHTML() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = 'FORMA_STUDIO_v6.html';
+  a.download = 'FORMA_STUDIO_v7.html';
   document.body.appendChild(a);
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
-  showStudioToast('FORMA_STUDIO_v6.html 다운로드 시작! 받은 파일을 더블클릭하면 크롬 전체화면으로 바로 열립니다.');
+  showStudioToast('FORMA_STUDIO_v7.html 다운로드 시작! 더블클릭하면 크롬 전체화면으로 바로 열립니다.');
 }
 
 /* ==========================================================================
@@ -2112,24 +2617,32 @@ function syncStudioViewportHeight() {
 
 window.addEventListener('DOMContentLoaded', () => {
   syncStudioViewportHeight();
-  if (typeof window !== 'undefined' && window.innerWidth < 980) {
+  // Keep the visual drag drawer OPEN side-by-side next to the homepage on Desktop & Inline embeds (>= 660px)!
+  if (typeof window !== 'undefined' && window.innerWidth < 660) {
     state.sidebarOpen = false;
     document.getElementById('st-sidebar')?.classList.add('is-collapsed');
     const btn = document.getElementById('sidebar-toggle-btn');
-    if (btn) btn.textContent = '◨ 에셋 패널 열기';
+    if (btn) btn.textContent = '◨ 요소창 열기';
   }
   window.addEventListener('resize', syncStudioViewportHeight);
 
+  updateUndoButtonUI();
   renderQuickSubbar();
   renderSidebarBody();
   renderLiveWebsite();
+  initDragAndDropSystem();
   initCustomCursorSystem();
 
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       if (state.presentation) togglePresentationMode(false);
+      if (state.tuneOpen) toggleTunePopover(false);
       document.getElementById('export-modal')?.classList.remove('is-open');
       document.getElementById('lightbox-modal')?.classList.remove('is-open');
+    }
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z' && !state.inlineEdit) {
+      e.preventDefault();
+      undoLastAction();
     }
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
       e.preventDefault();
