@@ -12,7 +12,7 @@ html, body {
   width: 100%;
   background: transparent;
   color: #ECEEF2;
-  font-family: 'Plus Jakarta Sans', 'IBM Plex Sans KR', -apple-system, BlinkMacSystemFont, sans-serif;
+  font-family: 'Plus Jakarta Sans', 'IBM Plex Sans KR', "Pretendard Variable", "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans CJK KR", -apple-system, BlinkMacSystemFont, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -38,31 +38,50 @@ html, body {
 }
 
 .st-topbar {
-  height: 48px;
-  min-height: 48px;
-  padding: 0 12px;
+  height: 72px;
+  min-height: 72px;
+  box-sizing: border-box;
+  padding: 0;
   background: rgba(12, 14, 19, 0.98);
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  flex-direction: column;
   z-index: 65;
   user-select: none;
+  flex-shrink: 0;
+}
+
+.st-topbar-row {
+  height: 37px;
+  min-height: 37px;
+  box-sizing: border-box;
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
   overflow-x: auto;
+  scrollbar-width: none;
+}
+.st-topbar-row::-webkit-scrollbar { display: none; }
+.st-topbar-row + .st-topbar-row {
+  height: 34px;
+  min-height: 34px;
+  background: #0D0F16;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 /* Quick Status / Slot Strip directly under Topbar for 1-click Feedback */
 .st-subbar {
-  height: 36px;
-  min-height: 36px;
-  padding: 0 12px;
+  height: 34px;
+  min-height: 34px;
+  padding: 0 10px;
   background: #0D0F15;
   border-bottom: 1px solid rgba(255, 255, 255, 0.07);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: 8px;
   z-index: 60;
   overflow-x: auto;
   user-select: none;
@@ -70,7 +89,8 @@ html, body {
 
 .st-app.is-presentation .st-topbar,
 .st-app.is-presentation .st-subbar,
-.st-app.is-presentation .st-sidebar {
+.st-app.is-presentation .st-sidebar,
+.st-app.is-presentation #st-right-panel {
   display: none !important;
 }
 
@@ -101,11 +121,11 @@ html, body {
   background: linear-gradient(135deg, #FFFFFF 0%, #94A3B8 100%);
   color: #090A0D;
   display: inline-flex; align-items: center; justify-content: center;
-  font-family: 'Syne', sans-serif; font-weight: 800; font-size: 13px;
+  font-family: 'Syne', "Pretendard Variable", "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans CJK KR", sans-serif; font-weight: 800; font-size: 13px;
 }
 .st-brand-name { font-size: 13px; font-weight: 800; letter-spacing: -0.02em; color: #F8FAFC; }
 .st-brand-tag {
-  font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #CBD5E1;
+  font-family: 'JetBrains Mono', monospace, "Pretendard Variable", "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans CJK KR", sans-serif; font-size: 12px; color: #CBD5E1;
   padding: 2px 7px; border-radius: 5px;
   background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.09);
 }
@@ -303,7 +323,7 @@ body.is-dragging, body.is-dragging * {
   opacity: 0; transition: opacity 0.15s ease;
   background: rgba(9, 11, 16, 0.86); backdrop-filter: blur(6px);
   border: 1px solid rgba(255,255,255,0.22); color: #E2E8F0;
-  font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700;
+  font-family: 'JetBrains Mono', monospace, "Pretendard Variable", "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans CJK KR", sans-serif; font-size: 11px; font-weight: 700;
   padding: 3px 8px; border-radius: 6px; cursor: pointer;
 }
 .st-drag-card:hover .st-thumb-code { opacity: 1; }
@@ -389,6 +409,17 @@ body.is-dragging, body.is-dragging * {
   background: #FAF8F5;
   transition: max-width 0.35s cubic-bezier(0.16, 1, 0.3, 1), margin 0.35s ease, border-radius 0.35s ease, box-shadow 0.2s ease;
 }
+.st-canvas-zoom-sizer {
+  width: 100%;
+  min-height: 100%;
+  position: relative;
+}
+.st-canvas-zoom-stage {
+  width: 100%;
+  min-height: 100%;
+  position: relative;
+  transform-origin: top center;
+}
 .st-canvas-frame.is-drop-hot {
   box-shadow: inset 0 0 0 3px #10B981;
 }
@@ -429,15 +460,17 @@ body.is-dragging, body.is-dragging * {
   box-shadow: 0 4px 14px rgba(0,0,0,0.4);
 }
 
-/* Direct On-Canvas Movable UI Elements (Figma / Framer Style!) */
+/* Direct On-Canvas Movable & Resizable UI Elements (Figma / Framer Style!) */
 .f-site.is-move-mode .f-free-ui,
 .f-site.is-move-mode .f-btn,
 .f-site.is-move-mode .f-bdg,
 .f-site.is-move-mode .f-media,
 .f-site.is-move-mode .f-card,
+.f-site.is-move-mode .f-input,
 .f-site.is-move-mode h1,
 .f-site.is-move-mode h2,
 .f-site.is-move-mode h3,
+.f-site.is-move-mode p,
 .f-site.is-move-mode .f-lead {
   cursor: grab;
   touch-action: none;
@@ -447,12 +480,25 @@ body.is-dragging, body.is-dragging * {
 .f-site.is-move-mode .f-bdg:hover,
 .f-site.is-move-mode .f-media:hover,
 .f-site.is-move-mode .f-card:hover,
+.f-site.is-move-mode .f-input:hover,
 .f-site.is-move-mode h1:hover,
 .f-site.is-move-mode h2:hover,
 .f-site.is-move-mode h3:hover,
+.f-site.is-move-mode p:hover,
 .f-site.is-move-mode .f-lead:hover {
   outline: 1.5px solid rgba(56, 189, 248, 0.85);
   outline-offset: 3px;
+}
+
+/* Double-Click Direct Text Editing Highlight */
+[data-live-editing="1"] {
+  outline: 2px solid #10B981 !important;
+  outline-offset: 4px !important;
+  background: rgba(16, 185, 129, 0.08) !important;
+  border-radius: 4px;
+  cursor: text !important;
+  user-select: text !important;
+  -webkit-user-select: text !important;
 }
 
 .f-free-ui {
@@ -461,7 +507,65 @@ body.is-dragging, body.is-dragging * {
   user-select: none;
 }
 
-/* Figma 4-Corner Selection Frame + Compact Icon Toolbar */
+/* Blank Freeform Artboard Section + Bottom Section Height Resize Handle */
+.f-blank-sec {
+  position: relative;
+  min-height: 420px;
+  background-color: var(--bg);
+  color: var(--fg);
+  border-bottom: 1px solid var(--border);
+  background-image: radial-gradient(rgba(128, 128, 128, 0.22) 1px, transparent 1px);
+  background-size: 24px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.f-blank-guide {
+  pointer-events: none;
+  padding: 20px 28px;
+  border-radius: 14px;
+  border: 1.5px dashed var(--border);
+  background: color-mix(in srgb, var(--surface) 76%, transparent);
+  backdrop-filter: blur(8px);
+  text-align: center;
+  max-width: 520px;
+  opacity: 0.78;
+}
+.st-app.is-presentation .f-blank-guide { display: none !important; }
+.st-app.is-presentation .f-blank-sec { background-image: none !important; }
+
+.f-sec-resize-bar {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 14px;
+  z-index: 65;
+  cursor: ns-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.16s ease, background 0.16s ease;
+}
+.f-site.guides-on .f-sec-wrap:hover > .f-sec-resize-bar,
+.f-sec-resize-bar.is-resizing {
+  opacity: 1;
+  background: rgba(56, 189, 248, 0.18);
+}
+.f-sec-resize-bar span {
+  padding: 1px 10px;
+  border-radius: 999px;
+  background: #0284C7;
+  color: #FFFFFF;
+  font-family: 'JetBrains Mono', monospace, "Pretendard Variable", "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans CJK KR", sans-serif;
+  font-size: 9.5px;
+  font-weight: 700;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+  pointer-events: none;
+}
+.st-app.is-presentation .f-sec-resize-bar { display: none !important; }
+
+/* Figma 8-Handle Interactive Selection Box + Size Readout Badge */
 .st-ui-sel-box {
   position: fixed;
   pointer-events: none;
@@ -473,46 +577,137 @@ body.is-dragging, body.is-dragging * {
 }
 .st-ui-sel-handle {
   position: absolute;
-  width: 9px; height: 9px;
+  width: 11px; height: 11px;
   background: #FFFFFF;
   border: 2px solid #0284C7;
-  border-radius: 2px;
+  border-radius: 3px;
+  pointer-events: auto;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.45);
+  transition: transform 0.12s ease, background 0.12s ease;
 }
-.st-ui-sel-handle.nw { top: -5px; left: -5px; }
-.st-ui-sel-handle.ne { top: -5px; right: -5px; }
-.st-ui-sel-handle.sw { bottom: -5px; left: -5px; }
-.st-ui-sel-handle.se { bottom: -5px; right: -5px; }
+.st-ui-sel-handle:hover {
+  background: #38BDF8;
+  transform: scale(1.28);
+}
+.st-ui-sel-handle.nw, .st-ui-sel-handle[data-handle="nw"] { top: -6px; left: -6px; cursor: nwse-resize; }
+.st-ui-sel-handle.n,  .st-ui-sel-handle[data-handle="n"]  { top: -6px; left: calc(50% - 5.5px); cursor: ns-resize; }
+.st-ui-sel-handle.ne, .st-ui-sel-handle[data-handle="ne"] { top: -6px; right: -6px; cursor: nesw-resize; }
+.st-ui-sel-handle.e,  .st-ui-sel-handle[data-handle="e"]  { top: calc(50% - 5.5px); right: -6px; cursor: ew-resize; }
+.st-ui-sel-handle.se, .st-ui-sel-handle[data-handle="se"] { bottom: -6px; right: -6px; cursor: nwse-resize; }
+.st-ui-sel-handle.s,  .st-ui-sel-handle[data-handle="s"]  { bottom: -6px; left: calc(50% - 5.5px); cursor: ns-resize; }
+.st-ui-sel-handle.sw, .st-ui-sel-handle[data-handle="sw"] { bottom: -6px; left: -6px; cursor: nesw-resize; }
+.st-ui-sel-handle.w,  .st-ui-sel-handle[data-handle="w"]  { top: calc(50% - 5.5px); left: -6px; cursor: ew-resize; }
+
+.st-ui-size-badge {
+  position: absolute;
+  bottom: -22px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #0284C7;
+  color: #FFFFFF;
+  font-family: 'JetBrains Mono', monospace, "Pretendard Variable", "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans CJK KR", sans-serif;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 4px 10px rgba(0,0,0,0.4);
+}
+
+/* Smart Magnetic Alignment Snap Guides */
+.st-snap-guide-x,
+.st-snap-guide-y {
+  position: fixed;
+  z-index: 92;
+  pointer-events: none;
+  display: none;
+}
+.st-snap-guide-x {
+  top: 48px; bottom: 0; width: 0;
+  border-left: 1.5px dashed #F43F5E;
+  box-shadow: 0 0 8px rgba(244, 63, 94, 0.55);
+}
+.st-snap-guide-y {
+  left: 0; right: 0; height: 0;
+  border-top: 1.5px dashed #F43F5E;
+  box-shadow: 0 0 8px rgba(244, 63, 94, 0.55);
+}
 
 .st-ui-toolbar {
   position: fixed;
   z-index: 95;
   display: none;
   align-items: center;
+  flex-wrap: wrap;
   gap: 3px;
-  padding: 4px 6px;
+  padding: 4px 7px;
   border-radius: 999px;
-  background: rgba(11, 14, 20, 0.94);
-  backdrop-filter: blur(12px);
-  border: 1px solid rgba(56, 189, 248, 0.55);
-  box-shadow: 0 12px 30px rgba(0,0,0,0.55);
+  background: rgba(11, 14, 20, 0.96);
+  backdrop-filter: blur(14px);
+  border: 1px solid rgba(56, 189, 248, 0.58);
+  box-shadow: 0 14px 36px rgba(0,0,0,0.65);
 }
 .st-ui-toolbar button {
   border: none;
   background: transparent;
   color: #F1F5F9;
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 700;
-  padding: 4px 8px;
+  padding: 4px 7px;
   border-radius: 999px;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   gap: 3px;
+  white-space: nowrap;
 }
 .st-ui-toolbar button:hover {
   background: rgba(56, 189, 248, 0.25);
   color: #FFFFFF;
 }
+.st-ui-color-dot {
+  width: 20px; height: 20px;
+  padding: 0; border: 1.5px solid rgba(255,255,255,0.45);
+  border-radius: 999px; background: transparent;
+  cursor: pointer; overflow: hidden; flex-shrink: 0;
+}
+.st-ui-color-dot::-webkit-color-swatch-wrapper { padding: 0; }
+.st-ui-color-dot::-webkit-color-swatch { border: none; border-radius: 999px; }
+
+/* Studio Quick Photo Picker & Link Editor Popover */
+.st-photo-popover {
+  position: fixed;
+  z-index: 98;
+  width: 320px;
+  background: #0F131D;
+  border: 1px solid rgba(56,189,248,0.45);
+  border-radius: 14px;
+  padding: 12px;
+  box-shadow: 0 24px 64px rgba(0,0,0,0.8);
+  display: none;
+  flex-direction: column;
+  gap: 10px;
+}
+.st-photo-popover.is-open { display: flex; }
+.st-photo-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+.st-photo-thumb {
+  height: 50px;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1.5px solid rgba(255,255,255,0.14);
+  cursor: pointer;
+  padding: 0;
+  background: #090B10;
+}
+.st-photo-thumb:hover { border-color: #38BDF8; transform: scale(1.04); }
+.st-photo-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 
 @keyframes dropAppliedFlash {
   0% { box-shadow: inset 0 0 0 5px #38BDF8; }
@@ -531,12 +726,12 @@ body.is-dragging, body.is-dragging * {
 .st-tune-popover.is-open { display: flex; }
 
 .st-canvas-frame.vp-tablet {
-  max-width: 780px; margin: 14px auto; height: calc(100% - 28px);
+  max-width: 768px; margin: 14px auto; height: calc(100% - 28px);
   border-radius: 18px; border: 1px solid rgba(255,255,255,0.16);
   box-shadow: 0 30px 90px rgba(0,0,0,0.75);
 }
 .st-canvas-frame.vp-mobile {
-  max-width: 396px; margin: 14px auto; height: calc(100% - 28px);
+  max-width: 390px; margin: 14px auto; height: calc(100% - 28px);
   border-radius: 32px; border: 4px solid #222632;
   box-shadow: 0 30px 90px rgba(0,0,0,0.8);
 }
@@ -624,7 +819,7 @@ body.is-dragging, body.is-dragging * {
   height: 22px; min-height: 22px; padding: 0 8px;
   background: rgba(12,14,20,0.92); border-bottom: 1px solid rgba(255,255,255,0.08);
   display: flex; align-items: center; justify-content: space-between;
-  font-family: 'JetBrains Mono', monospace; font-size: 10px; color: #94A3B8;
+  font-family: 'JetBrains Mono', monospace, "Pretendard Variable", "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans CJK KR", sans-serif; font-size: 10px; color: #94A3B8;
 }
 .st-sec-mini-viewport {
   flex: 1; overflow: hidden; position: relative;
@@ -689,7 +884,7 @@ body.is-dragging, body.is-dragging * {
   padding: 4px 8px; border-radius: 999px;
   background: rgba(12, 14, 18, 0.86); backdrop-filter: blur(12px);
   border: 1px solid rgba(255,255,255,0.18); color: #F8FAFC;
-  font-family: 'Plus Jakarta Sans', 'IBM Plex Sans KR', sans-serif;
+  font-family: 'Plus Jakarta Sans', 'IBM Plex Sans KR', "Pretendard Variable", "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans CJK KR", sans-serif;
   font-size: 12px; font-weight: 600;
   opacity: 0; pointer-events: none; transform: translateY(-4px);
   transition: opacity 0.18s ease, transform 0.18s ease;
@@ -754,43 +949,43 @@ body.is-dragging, body.is-dragging * {
    Every pairing visibly transforms BOTH Hangul & Latin characters offline!
    ========================================================================== */
 .fnt-01 {
-  --font-display: 'Cormorant Garamond', 'Noto Serif KR', Georgia, serif;
-  --font-body: 'Plus Jakarta Sans', 'IBM Plex Sans KR', sans-serif;
+  --font-display: 'Cormorant Garamond', 'Noto Serif KR', Georgia, serif, "Pretendard Variable", "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans CJK KR", sans-serif;
+  --font-body: 'Plus Jakarta Sans', 'IBM Plex Sans KR', "Pretendard Variable", "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans CJK KR", sans-serif;
   --display-weight: 600; --display-track: -0.025em; --display-lh: 1.12;
 }
 .fnt-02 {
-  --font-display: 'Plus Jakarta Sans', 'IBM Plex Sans KR', sans-serif;
-  --font-body: 'Plus Jakarta Sans', 'IBM Plex Sans KR', sans-serif;
+  --font-display: 'Plus Jakarta Sans', 'IBM Plex Sans KR', "Pretendard Variable", "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans CJK KR", sans-serif;
+  --font-body: 'Plus Jakarta Sans', 'IBM Plex Sans KR', "Pretendard Variable", "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans CJK KR", sans-serif;
   --display-weight: 700; --display-track: -0.04em; --display-lh: 1.12;
 }
 .fnt-03 {
-  --font-display: 'Syne', 'Black Han Sans', sans-serif;
-  --font-body: 'Space Grotesk', 'IBM Plex Sans KR', sans-serif;
+  --font-display: 'Syne', 'Black Han Sans', "Pretendard Variable", "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans CJK KR", sans-serif;
+  --font-body: 'Space Grotesk', 'IBM Plex Sans KR', "Pretendard Variable", "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans CJK KR", sans-serif;
   --display-weight: 400; --display-track: -0.015em; --display-lh: 1.08;
 }
 .fnt-04 {
-  --font-display: 'Playfair Display', 'Gowun Batang', Georgia, serif;
-  --font-body: 'Plus Jakarta Sans', 'Gowun Batang', serif;
+  --font-display: 'Playfair Display', 'Gowun Batang', Georgia, serif, "Pretendard Variable", "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans CJK KR", sans-serif;
+  --font-body: 'Plus Jakarta Sans', 'Gowun Batang', serif, "Pretendard Variable", "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans CJK KR", sans-serif;
   --display-weight: 700; --display-track: -0.02em; --display-lh: 1.16;
 }
 .fnt-05 {
-  --font-display: 'Space Grotesk', 'IBM Plex Sans KR', sans-serif;
-  --font-body: 'Space Grotesk', 'IBM Plex Sans KR', sans-serif;
+  --font-display: 'Space Grotesk', 'IBM Plex Sans KR', "Pretendard Variable", "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans CJK KR", sans-serif;
+  --font-body: 'Space Grotesk', 'IBM Plex Sans KR', "Pretendard Variable", "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans CJK KR", sans-serif;
   --display-weight: 700; --display-track: -0.035em; --display-lh: 1.1;
 }
 .fnt-06 {
-  --font-display: 'JetBrains Mono', 'IBM Plex Sans KR', monospace;
-  --font-body: 'JetBrains Mono', 'IBM Plex Sans KR', monospace;
+  --font-display: 'JetBrains Mono', 'IBM Plex Sans KR', monospace, "Pretendard Variable", "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans CJK KR", sans-serif;
+  --font-body: 'JetBrains Mono', 'IBM Plex Sans KR', monospace, "Pretendard Variable", "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans CJK KR", sans-serif;
   --display-weight: 600; --display-track: -0.04em; --display-lh: 1.16;
 }
 .fnt-07 {
-  --font-display: 'Playfair Display', 'Hahmlet', Georgia, serif;
-  --font-body: 'Space Grotesk', 'IBM Plex Sans KR', sans-serif;
+  --font-display: 'Playfair Display', 'Hahmlet', Georgia, serif, "Pretendard Variable", "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans CJK KR", sans-serif;
+  --font-body: 'Space Grotesk', 'IBM Plex Sans KR', "Pretendard Variable", "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans CJK KR", sans-serif;
   --display-weight: 700; --display-track: -0.03em; --display-lh: 1.12;
 }
 .fnt-08 {
-  --font-display: 'Cormorant Garamond', 'Noto Serif KR', serif;
-  --font-body: 'Plus Jakarta Sans', 'IBM Plex Sans KR', sans-serif;
+  --font-display: 'Cormorant Garamond', 'Noto Serif KR', serif, "Pretendard Variable", "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans CJK KR", sans-serif;
+  --font-body: 'Plus Jakarta Sans', 'IBM Plex Sans KR', "Pretendard Variable", "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans CJK KR", sans-serif;
   --display-weight: 300; --display-track: 0.025em; --display-lh: 1.18;
 }
 
@@ -818,14 +1013,14 @@ body.is-dragging, body.is-dragging * {
   font-size: clamp(1.2rem, 1.9vw, 1.55rem);
   margin: 0;
 }
-.f-mono { font-family: 'JetBrains Mono', 'IBM Plex Sans KR', monospace; }
+.f-mono { font-family: 'JetBrains Mono', 'IBM Plex Sans KR', monospace, "Pretendard Variable", "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans CJK KR", sans-serif; }
 
 /* ==========================================================================
    04. 10 KINETIC HEADLINE TREATMENTS (.tfx-01 ~ .tfx-10)
    ========================================================================== */
 .f-accent-word {
   font-style: italic;
-  font-family: 'Cormorant Garamond', 'Playfair Display', 'Noto Serif KR', serif;
+  font-family: 'Cormorant Garamond', 'Playfair Display', 'Noto Serif KR', serif, "Pretendard Variable", "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans CJK KR", sans-serif;
   font-weight: 600;
   color: var(--accent);
 }
@@ -1001,7 +1196,7 @@ body.is-dragging, body.is-dragging * {
 .srf-03 .f-card { border-radius: 2px; box-shadow: inset 0 0 0 7px var(--bg), inset 0 0 0 8px var(--border); padding: 34px; }
 .srf-04 .f-card { background: color-mix(in srgb, var(--surface) 64%, transparent); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); box-shadow: inset 0 1px 0 rgba(255,255,255,0.35), 0 20px 50px -20px rgba(0,0,0,0.2); }
 .srf-05 .f-card { border-radius: 0; }
-.srf-05 .f-card::after { content: "+"; position: absolute; top: 8px; right: 11px; font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--accent); opacity: 0.75; }
+.srf-05 .f-card::after { content: "+"; position: absolute; top: 8px; right: 11px; font-family: 'JetBrains Mono', monospace, "Pretendard Variable", "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans CJK KR", sans-serif; font-size: 12px; color: var(--accent); opacity: 0.75; }
 .srf-06 .f-card { border-color: transparent; box-shadow: 0 22px 54px -18px rgba(0,0,0,0.14), 0 4px 14px -4px rgba(0,0,0,0.06); }
 .srf-06 .f-card:hover { transform: translateY(-4px); }
 .srf-07 .f-card { background: transparent; border: none; border-top: 2px solid var(--fg); border-radius: 0; padding: 24px 0 8px; }
@@ -1076,7 +1271,7 @@ body.is-dragging, body.is-dragging * {
   pointer-events: none; z-index: 160;
   transform: translate(-50%, -50%);
   display: flex; align-items: center; justify-content: center;
-  font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 700;
+  font-family: 'JetBrains Mono', monospace, "Pretendard Variable", "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans CJK KR", sans-serif; font-size: 10px; font-weight: 700;
   color: #FFFFFF; opacity: 0;
   transition: width 0.24s cubic-bezier(0.16, 1, 0.3, 1), height 0.24s cubic-bezier(0.16, 1, 0.3, 1), background 0.24s ease, opacity 0.2s ease;
 }
@@ -1133,19 +1328,19 @@ body.is-dragging, body.is-dragging * {
   font-size: 12px; font-weight: 600; letter-spacing: 0.08em;
   text-transform: uppercase; line-height: 1.2;
 }
-.bdg-01 { font-family: 'Cormorant Garamond', 'Noto Serif KR', serif; font-style: italic; font-size: 15px; text-transform: none; letter-spacing: 0.02em; color: var(--accent); }
+.bdg-01 { font-family: 'Cormorant Garamond', 'Noto Serif KR', serif, "Pretendard Variable", "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans CJK KR", sans-serif; font-style: italic; font-size: 15px; text-transform: none; letter-spacing: 0.02em; color: var(--accent); }
 .bdg-01::before { content: "—"; margin-right: 4px; }
-.bdg-02 { font-family: 'JetBrains Mono', monospace; color: var(--fg); border-left: 2px solid var(--accent); padding-left: 10px; }
+.bdg-02 { font-family: 'JetBrains Mono', monospace, "Pretendard Variable", "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans CJK KR", sans-serif; color: var(--fg); border-left: 2px solid var(--accent); padding-left: 10px; }
 .bdg-03 { padding: 5px 12px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--fg); letter-spacing: 0.1em; }
-.bdg-04 { font-family: 'JetBrains Mono', monospace; color: var(--accent); }
+.bdg-04 { font-family: 'JetBrains Mono', monospace, "Pretendard Variable", "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans CJK KR", sans-serif; color: var(--accent); }
 .bdg-04::before { content: "//"; opacity: 0.6; }
-.bdg-05 { padding: 4px 10px; background: var(--fg); color: var(--bg); font-family: 'JetBrains Mono', monospace; border-radius: 2px; }
+.bdg-05 { padding: 4px 10px; background: var(--fg); color: var(--bg); font-family: 'JetBrains Mono', monospace, "Pretendard Variable", "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans CJK KR", sans-serif; border-radius: 2px; }
 .bdg-06 { border-bottom: 1.5px solid var(--accent); padding-bottom: 4px; color: var(--fg); }
 .bdg-07 { padding: 5px 12px; background: var(--accent-soft); color: var(--accent); border-radius: 4px; letter-spacing: 0.1em; }
-.bdg-08 { padding: 4px 12px; border: 3px double var(--fg); color: var(--fg); font-family: 'Playfair Display', 'Noto Serif KR', serif; }
-.bdg-09 { font-family: 'Space Grotesk', sans-serif; color: var(--fg); }
+.bdg-08 { padding: 4px 12px; border: 3px double var(--fg); color: var(--fg); font-family: 'Playfair Display', 'Noto Serif KR', serif, "Pretendard Variable", "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans CJK KR", sans-serif; }
+.bdg-09 { font-family: 'Space Grotesk', "Pretendard Variable", "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans CJK KR", sans-serif; color: var(--fg); }
 .bdg-09::before { content: ""; width: 22px; height: 1.5px; background: var(--accent); }
-.bdg-10 { padding: 4px 10px; border: 1px dashed var(--accent); font-family: 'JetBrains Mono', monospace; color: var(--sub); }
+.bdg-10 { padding: 4px 10px; border: 1px dashed var(--accent); font-family: 'JetBrains Mono', monospace, "Pretendard Variable", "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans CJK KR", sans-serif; color: var(--sub); }
 
 /* ==========================================================================
    12. [NEW] INTRO CURTAIN PRELOADERS & SCROLL PROGRESS (.pre-*)
@@ -1196,13 +1391,34 @@ body.is-dragging, body.is-dragging * {
 }
 .st-toast.is-visible { opacity: 1; transform: translate(-50%, 0); }
 
+.st-modal-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px 20px;
+}
+
 @media (max-width: 1080px) {
   .hide-narrow { display: none !important; }
+  .st-topbar { height: auto; min-height: 56px; padding: 2px 0; }
+  .st-topbar-row { height: auto; min-height: 26px; padding: 2px 4px; gap: 3px; flex-wrap: wrap; overflow-x: visible; }
+  .st-topbar-row + .st-topbar-row { height: auto; min-height: 26px; }
+  .st-topbar-row > div { gap: 2px !important; flex-wrap: wrap; }
+  .st-topbar .st-pill-btn,
+  .st-topbar .st-mode-btn { font-size: 10px !important; padding: 2px 4px !important; gap: 2px !important; }
+  .st-topbar .st-world-select,
+  .st-topbar .st-select { font-size: 10px !important; padding: 2px 4px !important; max-width: 84px; }
+  #st-project-name-label { max-width: 56px !important; }
   .st-sidebar { width: 386px; min-width: 386px; --sec-zoom: 0.474; }
   .st-sidebar.is-wide { width: 500px; min-width: 500px; --sec-zoom: 0.624; }
   .st-sidebar.is-collapsed { margin-left: -386px; }
   .st-sidebar.is-wide.is-collapsed { margin-left: -500px; }
   .st-drag-ghost.is-sec-ghost { width: 320px; max-width: 320px; --sec-zoom: 0.42; }
+}
+
+@media (max-width: 920px) and (min-width: 660px) {
+  .st-sidebar { width: 320px; min-width: 320px; --sec-zoom: 0.384; }
+  .st-sidebar.is-collapsed { margin-left: -320px; }
 }
 
 @media (max-width: 659px) {
@@ -1219,4 +1435,60 @@ body.is-dragging, body.is-dragging * {
   .st-modal-backdrop { padding: 10px; }
   .st-modal-box { max-height: 472px; }
   #export-code-area, #export-preview-frame { height: 290px !important; }
+}
+
+/* ==========================================================================
+   EDITOR-FREE CLIENT PREVIEW RUNTIME (?mode=client — F18)
+   ========================================================================== */
+html.is-client-mode,
+html.is-client-mode body {
+  height: auto !important;
+  min-height: 100vh !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  background: var(--bg, #FAF8F5) !important;
+}
+html.is-client-mode #studio-app,
+html.is-client-mode .st-workspace,
+html.is-client-mode .st-stage,
+html.is-client-mode #canvas-frame,
+html.is-client-mode #canvas-zoom-sizer,
+html.is-client-mode #canvas-zoom-stage,
+html.is-client-mode #website-mount {
+  display: block !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  height: auto !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: none !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  overflow: visible !important;
+  transform: none !important;
+}
+html.is-client-mode #st-topbar,
+html.is-client-mode #st-subbar,
+html.is-client-mode #st-sidebar,
+html.is-client-mode #st-right-panel,
+html.is-client-mode #st-ui-sel-box,
+html.is-client-mode #st-ui-toolbar,
+html.is-client-mode #st-marquee-box,
+html.is-client-mode #st-context-menu,
+html.is-client-mode #st-snap-guide-x,
+html.is-client-mode #st-snap-guide-y,
+html.is-client-mode #st-drag-ghost,
+html.is-client-mode #st-sec-drop-line,
+html.is-client-mode #vault-view,
+html.is-client-mode #st-tune-popover,
+html.is-client-mode #st-photo-popover,
+html.is-client-mode .st-exit-pres,
+html.is-client-mode .f-sec-pill,
+html.is-client-mode .f-sec-resize-bar,
+html.is-client-mode .f-blank-guide {
+  display: none !important;
+}
+html.is-client-mode .f-blank-sec {
+  background-image: none !important;
 }

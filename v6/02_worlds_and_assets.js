@@ -610,15 +610,20 @@ const VAULT = {
 
   widget: [
     { id: 'WGT-01', name: '프로스티드 글래스 플로팅 독 (macOS풍)', desc: '화면 하단에 떠 있는 반투명 유리 내비게이션 & 빠른 예약 독',
-      render: (w) => `<div style="position:sticky;bottom:18px;z-index:30;display:flex;justify-content:center;pointer-events:none;padding:0 16px;">
-        <div style="pointer-events:auto;display:inline-flex;align-items:center;gap:18px;padding:8px 10px 8px 20px;border-radius:999px;background:rgba(15,17,22,0.86);backdrop-filter:blur(18px);border:1px solid rgba(255,255,255,0.18);color:#F8FAFC;font-size:12px;font-weight:600;box-shadow:0 20px 50px rgba(0,0,0,0.38);">
-          <span style="opacity:0.95;font-weight:700;">${w.brand}</span>
-          <span class="hide-narrow" style="opacity:0.7;cursor:pointer" onclick="document.getElementById('sec-feature')?.scrollIntoView({behavior:'smooth'})">${w.nav[0]}</span>
-          <span class="hide-narrow" style="opacity:0.7;cursor:pointer" onclick="document.getElementById('sec-gallery')?.scrollIntoView({behavior:'smooth'})">${w.nav[1]}</span>
-          <span class="hide-narrow" style="opacity:0.7;cursor:pointer" onclick="document.getElementById('sec-pricing')?.scrollIntoView({behavior:'smooth'})">${w.nav[3]}</span>
-          <button type="button" onclick="document.getElementById('sec-form')?.scrollIntoView({behavior:'smooth'})" style="background:var(--accent);color:var(--accent-fg);border:none;padding:8px 16px;border-radius:999px;font-size:12px;font-weight:700;cursor:pointer;">${w.ctaPrimary} →</button>
-        </div>
-      </div>` },
+      render: (w, ctx) => {
+        const navItems = typeof getSiteNavLinks === 'function' ? getSiteNavLinks(w, ctx) : [];
+        return `<div style="position:sticky;bottom:18px;z-index:30;display:flex;justify-content:center;pointer-events:none;padding:0 16px;">
+          <div style="pointer-events:auto;display:inline-flex;align-items:center;gap:18px;padding:8px 10px 8px 20px;border-radius:999px;background:rgba(15,17,22,0.86);backdrop-filter:blur(18px);border:1px solid rgba(255,255,255,0.18);color:#F8FAFC;font-size:12px;font-weight:600;box-shadow:0 20px 50px rgba(0,0,0,0.38);">
+            <span style="opacity:0.95;font-weight:700;">${w.brand}</span>
+            ${navItems.length
+              ? navItems.map(it => typeof renderPageNavLink === 'function' ? renderPageNavLink(it, 'color:#F8FAFC;opacity:0.78;') : '').join('')
+              : `<span class="hide-narrow" style="opacity:0.7;cursor:pointer" onclick="document.getElementById('sec-feature')?.scrollIntoView({behavior:'smooth'})">${w.nav[0]}</span>
+                 <span class="hide-narrow" style="opacity:0.7;cursor:pointer" onclick="document.getElementById('sec-gallery')?.scrollIntoView({behavior:'smooth'})">${w.nav[1]}</span>
+                 <span class="hide-narrow" style="opacity:0.7;cursor:pointer" onclick="document.getElementById('sec-pricing')?.scrollIntoView({behavior:'smooth'})">${w.nav[3]}</span>`}
+            <button type="button" onclick="document.getElementById('sec-form')?.scrollIntoView({behavior:'smooth'})" style="background:var(--accent);color:var(--accent-fg);border:none;padding:8px 16px;border-radius:999px;font-size:12px;font-weight:700;cursor:pointer;">${w.ctaPrimary} →</button>
+          </div>
+        </div>`;
+      } },
     { id: 'WGT-02', name: '1:1 실시간 컨시어지 컨설테이션 버블', desc: '우측 하단에 고정되는 전담 컨시어지 직통 상담 버튼',
       render: (w) => `<div style="position:sticky;bottom:18px;z-index:30;display:flex;justify-content:flex-end;pointer-events:none;padding:0 24px;">
         <button type="button" onclick="showStudioToast('전담 컨시어지 데스크와 실시간 연결되었습니다.')" style="pointer-events:auto;display:inline-flex;align-items:center;gap:10px;padding:12px 20px;border-radius:999px;background:var(--fg);color:var(--bg);border:1px solid var(--border);font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 18px 40px rgba(0,0,0,0.28);">

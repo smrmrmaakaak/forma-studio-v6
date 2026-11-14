@@ -4,12 +4,53 @@
    ========================================================================== */
 
 function fmtHeadline(pre, accent, tfxId) {
-  const full = `${pre} <span class="f-accent-word" data-scramble="${accent}">${accent}</span>`;
+  const cleanPre = pre ? String(pre).trim() : '';
+  const full = cleanPre
+    ? `${cleanPre} <span class="f-accent-word" data-scramble="${accent}">${accent}</span>`
+    : `<span class="f-accent-word" data-scramble="${accent}">${accent}</span>`;
   if (tfxId === 'TFX-02') {
-    const words = pre.split(' ').map((w, i) => `<span class="tfx-word"><span style="--wi:${i}">${w}</span></span>`).join(' ');
+    if (!cleanPre) {
+      return `<span class="tfx-word"><span style="--wi:0" class="f-accent-word">${accent}</span></span>`;
+    }
+    const words = cleanPre.split(' ').map((w, i) => `<span class="tfx-word"><span style="--wi:${i}">${w}</span></span>`).join(' ');
     return `${words} <span class="tfx-word"><span style="--wi:5" class="f-accent-word">${accent}</span></span>`;
   }
   return full;
+}
+
+function getSiteNavLinks(w, ctx) {
+  if (ctx && Array.isArray(ctx.pages) && ctx.pages.length > 0) {
+    return ctx.pages.map(p => ({
+      slug: p.slug,
+      label: p.title,
+      active: p.slug === ctx.activePageSlug,
+      href: `#/${p.slug}`
+    }));
+  }
+  if (typeof FORMA_PRO !== 'undefined' && FORMA_PRO.ProjectState && typeof FORMA_PRO.ProjectState.getDoc === 'function') {
+    const doc = FORMA_PRO.ProjectState.getDoc();
+    const active = FORMA_PRO.ProjectState.getActivePage?.();
+    if (doc && Array.isArray(doc.pages) && doc.pages.length > 0) {
+      return doc.pages.map(p => ({
+        slug: p.slug,
+        label: p.title,
+        active: active ? p.slug === active.slug : p.slug === 'home',
+        href: `#/${p.slug}`
+      }));
+    }
+  }
+  const defaults = [
+    { slug: 'home', label: 'Home' },
+    { slug: 'about', label: 'About' },
+    { slug: 'portfolio', label: 'Portfolio' },
+    { slug: 'contact', label: 'Contact' }
+  ];
+  return defaults.map((d, i) => ({ ...d, active: i === 0, href: `#/${d.slug}` }));
+}
+
+function renderPageNavLink(item, styleStr = '') {
+  const activeStyle = item.active ? 'color:var(--fg);font-weight:700;' : '';
+  return `<a href="${item.href}" data-page-link="${item.slug}" data-page-slug="${item.slug}" ${item.active ? 'aria-current="page"' : ''} onclick="if(typeof formaNavigatePage==='function'){return formaNavigatePage('${item.slug}',event);}event.preventDefault();" style="text-decoration:none;cursor:pointer;${styleStr}${activeStyle}">${item.label}</a>`;
 }
 
 Object.assign(VAULT, {
@@ -58,82 +99,113 @@ Object.assign(VAULT, {
   /* 15. NAVIGATION HEADERS (8) */
   navbar: [
     { id: 'NAV-01', name: '아키텍처 스탠다드 플래그십 GNB', desc: '좌측 워드마크, 중앙 정돈된 메뉴, 우측 장착 버튼이 조화를 이루는 정석 헤더',
-      render: (w, ctx) => `<header style="padding:18px var(--sec-px);border-bottom:1px solid var(--border);background:color-mix(in srgb, var(--bg) 88%, transparent);backdrop-filter:blur(14px);display:flex;align-items:center;justify-content:space-between;gap:20px;">
-        <a href="#top" onclick="event.preventDefault()" style="font-family:var(--font-display);font-weight:700;font-size:20px;letter-spacing:0.02em;color:var(--fg);text-decoration:none;">${w.brand}</a>
-        <nav class="hide-narrow" style="display:flex;align-items:center;gap:30px;font-size:13px;font-weight:500;color:var(--sub);">
-          ${w.nav.map((n, i) => `<a href="#sec-${['feature','gallery','process','pricing'][i]||'feature'}" onclick="event.preventDefault();document.getElementById('sec-${['feature','gallery','process','pricing'][i]||'feature'}')?.scrollIntoView({behavior:'smooth'})" style="color:${i===0?'var(--fg)':'var(--sub)'};text-decoration:none;">${n}</a>`).join('')}
-        </nav>
-        <div>${ctx.btn(w.ctaPrimary)}</div>
-      </header>` },
-    { id: 'NAV-02', name: '플로팅 글래스 아일랜드 캡슐 (Linear/Apple풍)', desc: '상단 여백 중앙에 부유하는 반투명 유리 캡슐 독 내비게이션',
-      render: (w, ctx) => `<div style="padding:16px var(--sec-px) 6px;display:flex;justify-content:center;">
-        <header style="width:100%;max-width:1160px;padding:10px 12px 10px 24px;border-radius:999px;background:color-mix(in srgb, var(--surface) 82%, transparent);backdrop-filter:blur(20px);border:1px solid var(--border);box-shadow:0 16px 40px -14px rgba(0,0,0,0.12);display:flex;align-items:center;justify-content:space-between;gap:16px;">
-          <span style="font-family:var(--font-display);font-weight:700;font-size:17px;">${w.brand}</span>
-          <nav class="hide-narrow" style="display:flex;gap:26px;font-size:13px;font-weight:500;color:var(--sub);">
-            ${w.nav.map((n, i) => `<span style="cursor:pointer;" onclick="document.getElementById('sec-${['feature','gallery','team','pricing'][i]||'feature'}')?.scrollIntoView({behavior:'smooth'})">${n}</span>`).join('')}
+      render: (w, ctx) => {
+        const navItems = getSiteNavLinks(w, ctx);
+        return `<header style="padding:18px var(--sec-px);border-bottom:1px solid var(--border);background:color-mix(in srgb, var(--bg) 88%, transparent);backdrop-filter:blur(14px);display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:16px;">
+          <a href="#/home" data-page-link="home" data-page-slug="home" onclick="if(typeof formaNavigatePage==='function'){return formaNavigatePage('home',event);}event.preventDefault();" style="font-family:var(--font-display);font-weight:700;font-size:20px;letter-spacing:0.02em;color:var(--fg);text-decoration:none;">${w.brand}</a>
+          <nav style="display:flex;align-items:center;gap:22px;font-size:13px;font-weight:500;color:var(--sub);flex-wrap:wrap;">
+            ${navItems.map(it => renderPageNavLink(it, 'color:var(--sub);')).join('')}
           </nav>
           <div>${ctx.btn(w.ctaPrimary)}</div>
-        </header>
-      </div>` },
+        </header>`;
+      } },
+    { id: 'NAV-02', name: '플로팅 글래스 아일랜드 캡슐 (Linear/Apple풍)', desc: '상단 여백 중앙에 부유하는 반투명 유리 캡슐 독 내비게이션',
+      render: (w, ctx) => {
+        const navItems = getSiteNavLinks(w, ctx);
+        return `<div style="padding:16px var(--sec-px) 6px;display:flex;justify-content:center;">
+          <header style="width:100%;max-width:1160px;padding:10px 12px 10px 24px;border-radius:999px;background:color-mix(in srgb, var(--surface) 82%, transparent);backdrop-filter:blur(20px);border:1px solid var(--border);box-shadow:0 16px 40px -14px rgba(0,0,0,0.12);display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:14px;">
+            <a href="#/home" data-page-link="home" data-page-slug="home" onclick="if(typeof formaNavigatePage==='function'){return formaNavigatePage('home',event);}event.preventDefault();" style="font-family:var(--font-display);font-weight:700;font-size:17px;color:var(--fg);text-decoration:none;">${w.brand}</a>
+            <nav style="display:flex;gap:20px;font-size:13px;font-weight:500;color:var(--sub);flex-wrap:wrap;">
+              ${navItems.map(it => renderPageNavLink(it, 'color:var(--sub);')).join('')}
+            </nav>
+            <div>${ctx.btn(w.ctaPrimary)}</div>
+          </header>
+        </div>`;
+      } },
     { id: 'NAV-03', name: '보그 센터 마스트헤드 에디토리얼 헤더', desc: '중앙 대형 세리프 로고와 좌우 대칭 메뉴로 완성한 하이엔드 호텔·매거진 헤더',
-      render: (w, ctx) => `<header style="padding:22px var(--sec-px);border-bottom:1px solid var(--border);display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:16px;">
-        <nav class="hide-narrow" style="display:flex;gap:22px;font-size:12px;letter-spacing:0.12em;text-transform:uppercase;color:var(--sub);">
-          <span style="cursor:pointer;" onclick="document.getElementById('sec-feature')?.scrollIntoView({behavior:'smooth'})">${w.nav[0]}</span>
-          <span style="cursor:pointer;" onclick="document.getElementById('sec-gallery')?.scrollIntoView({behavior:'smooth'})">${w.nav[1]}</span>
-        </nav>
-        <div style="font-family:var(--font-display);font-size:25px;font-weight:var(--display-weight);letter-spacing:0.12em;text-align:center;">${w.brand}</div>
-        <div style="display:flex;justify-content:flex-end;align-items:center;gap:18px;">
-          <span class="hide-narrow" style="font-size:12px;letter-spacing:0.12em;text-transform:uppercase;color:var(--sub);cursor:pointer;" onclick="document.getElementById('sec-pricing')?.scrollIntoView({behavior:'smooth'})">${w.nav[3]}</span>
-          ${ctx.btn('RESERVE')}
-        </div>
-      </header>` },
-    { id: 'NAV-04', name: '스위스 아키텍처 그리드 셀 헤더', desc: '수직 실선으로 각 메뉴 셀을 구획한 모더니즘 스튜디오 헤더',
-      render: (w, ctx) => `<header style="display:grid;grid-template-columns:1.4fr 2fr auto;border-bottom:1.5px solid var(--fg);align-items:stretch;">
-        <div style="padding:16px 26px;border-right:1.5px solid var(--fg);display:flex;align-items:center;font-family:var(--font-display);font-weight:800;font-size:19px;">${w.brand}</div>
-        <div class="hide-narrow" style="padding:16px 26px;border-right:1.5px solid var(--fg);display:flex;align-items:center;justify-content:space-around;font-family:'JetBrains Mono',monospace;font-size:12px;">
-          ${w.nav.slice(0,3).map((n,i)=>`<span style="cursor:pointer;" onclick="document.getElementById('sec-${['feature','process','gallery'][i]}') ?.scrollIntoView({behavior:'smooth'})">0${i+1}. ${n}</span>`).join('')}
-        </div>
-        <div style="padding:10px 18px;display:flex;align-items:center;">${ctx.btn(w.ctaPrimary)}</div>
-      </header>` },
-    { id: 'NAV-05', name: '이그제큐티브 2단 프라이빗 뱅킹 헤더', desc: '상단 브랜드·자문 데스크 층과 하단 전문 센터 네비게이션 층을 분리',
-      render: (w, ctx) => `<header style="border-bottom:1px solid var(--border);background:var(--surface);">
-        <div style="padding:16px var(--sec-px);border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;">
-          <div style="display:flex;align-items:baseline;gap:14px;">
-            <span style="font-family:var(--font-display);font-weight:700;font-size:22px;">${w.brand}</span>
-            <span class="hide-narrow" style="font-size:12px;color:var(--sub);letter-spacing:0.06em;">${w.eyebrow}</span>
+      render: (w, ctx) => {
+        const navItems = getSiteNavLinks(w, ctx);
+        const mid = Math.ceil(navItems.length / 2);
+        const leftItems = navItems.slice(0, mid);
+        const rightItems = navItems.slice(mid);
+        return `<header style="padding:22px var(--sec-px);border-bottom:1px solid var(--border);display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:16px;">
+          <nav style="display:flex;gap:18px;font-size:12px;letter-spacing:0.12em;text-transform:uppercase;color:var(--sub);flex-wrap:wrap;">
+            ${leftItems.map(it => renderPageNavLink(it, 'color:var(--sub);')).join('')}
+          </nav>
+          <a href="#/home" data-page-link="home" data-page-slug="home" onclick="if(typeof formaNavigatePage==='function'){return formaNavigatePage('home',event);}event.preventDefault();" style="font-family:var(--font-display);font-size:25px;font-weight:var(--display-weight);letter-spacing:0.12em;text-align:center;color:var(--fg);text-decoration:none;">${w.brand}</a>
+          <div style="display:flex;justify-content:flex-end;align-items:center;gap:16px;flex-wrap:wrap;">
+            <nav style="display:flex;gap:16px;font-size:12px;letter-spacing:0.12em;text-transform:uppercase;color:var(--sub);flex-wrap:wrap;">
+              ${rightItems.map(it => renderPageNavLink(it, 'color:var(--sub);')).join('')}
+            </nav>
+            ${ctx.btn('RESERVE')}
           </div>
-          ${ctx.btn(w.ctaPrimary)}
-        </div>
-        <div style="padding:10px var(--sec-px);background:var(--muted);display:flex;gap:32px;font-size:12px;font-weight:600;overflow-x:auto;">
-          ${w.nav.map(n => `<span style="white-space:nowrap;cursor:pointer;">${n}</span>`).join('')}
-        </div>
-      </header>` },
+        </header>`;
+      } },
+    { id: 'NAV-04', name: '스위스 아키텍처 그리드 셀 헤더', desc: '수직 실선으로 각 메뉴 셀을 구획한 모더니즘 스튜디오 헤더',
+      render: (w, ctx) => {
+        const navItems = getSiteNavLinks(w, ctx);
+        return `<header style="display:grid;grid-template-columns:1.4fr 2fr auto;border-bottom:1.5px solid var(--fg);align-items:stretch;">
+          <a href="#/home" data-page-link="home" data-page-slug="home" onclick="if(typeof formaNavigatePage==='function'){return formaNavigatePage('home',event);}event.preventDefault();" style="padding:16px 22px;border-right:1.5px solid var(--fg);display:flex;align-items:center;font-family:var(--font-display);font-weight:800;font-size:19px;color:var(--fg);text-decoration:none;">${w.brand}</a>
+          <nav style="padding:14px 20px;border-right:1.5px solid var(--fg);display:flex;align-items:center;justify-content:space-around;gap:12px;flex-wrap:wrap;font-family:'JetBrains Mono',monospace;font-size:12px;">
+            ${navItems.map((it, i) => renderPageNavLink({ ...it, label: `0${i+1}. ${it.label}` }, 'color:var(--sub);')).join('')}
+          </nav>
+          <div style="padding:10px 18px;display:flex;align-items:center;">${ctx.btn(w.ctaPrimary)}</div>
+        </header>`;
+      } },
+    { id: 'NAV-05', name: '이그제큐티브 2단 프라이빗 뱅킹 헤더', desc: '상단 브랜드·자문 데스크 층과 하단 전문 센터 네비게이션 층을 분리',
+      render: (w, ctx) => {
+        const navItems = getSiteNavLinks(w, ctx);
+        return `<header style="border-bottom:1px solid var(--border);background:var(--surface);">
+          <div style="padding:16px var(--sec-px);border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;">
+            <div style="display:flex;align-items:baseline;gap:14px;">
+              <a href="#/home" data-page-link="home" data-page-slug="home" onclick="if(typeof formaNavigatePage==='function'){return formaNavigatePage('home',event);}event.preventDefault();" style="font-family:var(--font-display);font-weight:700;font-size:22px;color:var(--fg);text-decoration:none;">${w.brand}</a>
+              <span class="hide-narrow" style="font-size:12px;color:var(--sub);letter-spacing:0.06em;">${w.eyebrow}</span>
+            </div>
+            ${ctx.btn(w.ctaPrimary)}
+          </div>
+          <nav style="padding:10px var(--sec-px);background:var(--muted);display:flex;gap:28px;font-size:12px;font-weight:600;overflow-x:auto;">
+            ${navItems.map(it => renderPageNavLink(it, 'white-space:nowrap;color:var(--sub);')).join('')}
+          </nav>
+        </header>`;
+      } },
     { id: 'NAV-06', name: '커맨드 팔레트(⌘K) 결합 테크 헤더', desc: '검색 단축키 필과 버전 배지를 포함한 모던 프로덕트 헤더',
-      render: (w, ctx) => `<header style="padding:16px var(--sec-px);border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:16px;">
-        <div style="display:flex;align-items:center;gap:10px;">
-          <span style="font-family:var(--font-display);font-weight:800;font-size:18px;">${w.brand}</span>
-          <span class="f-mono" style="font-size:12px;padding:2px 8px;border-radius:999px;background:var(--accent-soft);color:var(--accent);font-weight:600;">2026.6</span>
-        </div>
-        <div class="hide-narrow" onclick="setStudioMode('vault')" style="padding:7px 16px;border-radius:999px;background:var(--muted);border:1px solid var(--border);font-size:12px;color:var(--sub);display:flex;align-items:center;gap:24px;cursor:pointer;">
-          <span>전체 252종 디자인 에셋 검색 열기...</span>
-          <kbd class="f-mono" style="font-size:12px;padding:1px 6px;border-radius:4px;background:var(--surface);border:1px solid var(--border);color:var(--fg);">⌘K</kbd>
-        </div>
-        <div>${ctx.btn(w.ctaPrimary)}</div>
-      </header>` },
+      render: (w, ctx) => {
+        const navItems = getSiteNavLinks(w, ctx);
+        return `<header style="padding:16px var(--sec-px);border-bottom:1px solid var(--border);display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:14px;">
+          <div style="display:flex;align-items:center;gap:10px;">
+            <a href="#/home" data-page-link="home" data-page-slug="home" onclick="if(typeof formaNavigatePage==='function'){return formaNavigatePage('home',event);}event.preventDefault();" style="font-family:var(--font-display);font-weight:800;font-size:18px;color:var(--fg);text-decoration:none;">${w.brand}</a>
+            <span class="f-mono" style="font-size:12px;padding:2px 8px;border-radius:999px;background:var(--accent-soft);color:var(--accent);font-weight:600;">2026.6</span>
+          </div>
+          <nav style="display:flex;align-items:center;gap:18px;font-size:12.5px;color:var(--sub);flex-wrap:wrap;">
+            ${navItems.map(it => renderPageNavLink(it, 'color:var(--sub);')).join('')}
+          </nav>
+          <div class="hide-narrow" onclick="if(window.FORMA_PRO?.ClientMode?.isClientMode?.())return;setStudioMode('vault')" style="padding:7px 14px;border-radius:999px;background:var(--muted);border:1px solid var(--border);font-size:12px;color:var(--sub);display:flex;align-items:center;gap:16px;cursor:pointer;">
+            <span>전체 252종 디자인 에셋 검색...</span>
+            <kbd class="f-mono" style="font-size:12px;padding:1px 6px;border-radius:4px;background:var(--surface);border:1px solid var(--border);color:var(--fg);">⌘K</kbd>
+          </div>
+          <div>${ctx.btn(w.ctaPrimary)}</div>
+        </header>`;
+      } },
     { id: 'NAV-07', name: '보더리스 갤러리 호라이즌 헤더', desc: '구분선 없이 압도적 공간감으로 시작하는 파인아트 갤러리 스타일',
-      render: (w, ctx) => `<header style="padding:28px var(--sec-px) 12px;display:flex;align-items:center;justify-content:space-between;">
-        <span style="font-family:var(--font-display);font-size:22px;font-weight:600;letter-spacing:0.06em;">${w.brand}</span>
-        <div style="display:flex;align-items:center;gap:28px;">
-          <nav class="hide-narrow" style="display:flex;gap:24px;font-size:13px;color:var(--sub);">${w.nav.slice(0,3).map(n=>`<span>${n}</span>`).join('')}</nav>
-          ${ctx.btn(w.ctaPrimary)}
-        </div>
-      </header>` },
+      render: (w, ctx) => {
+        const navItems = getSiteNavLinks(w, ctx);
+        return `<header style="padding:28px var(--sec-px) 12px;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:16px;">
+          <a href="#/home" data-page-link="home" data-page-slug="home" onclick="if(typeof formaNavigatePage==='function'){return formaNavigatePage('home',event);}event.preventDefault();" style="font-family:var(--font-display);font-size:22px;font-weight:600;letter-spacing:0.06em;color:var(--fg);text-decoration:none;">${w.brand}</a>
+          <div style="display:flex;align-items:center;gap:24px;flex-wrap:wrap;">
+            <nav style="display:flex;gap:20px;font-size:13px;color:var(--sub);flex-wrap:wrap;">${navItems.map(it => renderPageNavLink(it, 'color:var(--sub);')).join('')}</nav>
+            ${ctx.btn(w.ctaPrimary)}
+          </div>
+        </header>`;
+      } },
     { id: 'NAV-08', name: '다크 모놀리스 인버트 헤더', desc: '라이트 테마에서도 상단을 묵직한 다크 잉크 바로 잡아주는 대비형 헤더',
-      render: (w, ctx) => `<header style="padding:16px var(--sec-px);background:var(--fg);color:var(--bg);display:flex;align-items:center;justify-content:space-between;">
-        <span style="font-family:var(--font-display);font-size:19px;font-weight:700;letter-spacing:0.08em;">${w.brand}</span>
-        <nav class="hide-narrow" style="display:flex;gap:28px;font-size:12px;opacity:0.84;">${w.nav.map(n=>`<span>${n}</span>`).join('')}</nav>
-        <div>${ctx.btn(w.ctaPrimary)}</div>
-      </header>` }
+      render: (w, ctx) => {
+        const navItems = getSiteNavLinks(w, ctx);
+        return `<header style="padding:16px var(--sec-px);background:var(--fg);color:var(--bg);display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:16px;">
+          <a href="#/home" data-page-link="home" data-page-slug="home" onclick="if(typeof formaNavigatePage==='function'){return formaNavigatePage('home',event);}event.preventDefault();" style="font-family:var(--font-display);font-size:19px;font-weight:700;letter-spacing:0.08em;color:var(--bg);text-decoration:none;">${w.brand}</a>
+          <nav style="display:flex;gap:22px;font-size:12px;opacity:0.9;flex-wrap:wrap;">${navItems.map(it => renderPageNavLink(it, 'color:var(--bg);')).join('')}</nav>
+          <div>${ctx.btn(w.ctaPrimary)}</div>
+        </header>`;
+      } }
   ],
 
   /* ========================================================================

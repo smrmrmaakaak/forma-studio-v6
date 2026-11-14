@@ -1,0 +1,251 @@
+/* ==========================================================================
+   FORMA STUDIO Pro — M2 CANVAS STAGE, LOGICAL ARTBOARDS, ZOOM, MARQUEE & SNAP
+   ========================================================================== */
+
+/* 1. Full-Width Scrollable Canvas Frame in Editor Mode (Never Shrink Frame Below Artboard) */
+html:not(.is-client-mode) #canvas-frame,
+html:not(.is-client-mode) .st-canvas-frame.vp-tablet,
+html:not(.is-client-mode) .st-canvas-frame.vp-mobile {
+  width: 100% !important;
+  max-width: 100% !important;
+  height: 100% !important;
+  margin: 0 !important;
+  border: none !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  overflow: auto !important;
+  position: relative !important;
+  background: #0B0D14;
+}
+
+html:not(.is-client-mode) #canvas-zoom-sizer {
+  position: relative;
+  margin: 0 auto;
+  overflow: visible;
+}
+
+html:not(.is-client-mode) #canvas-zoom-stage {
+  transform-origin: top left !important;
+  position: relative;
+  margin: 0;
+  will-change: transform;
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.65);
+}
+
+/* 2. Exact Logical Artboard Widths: Desktop (1280px), Tablet (768px), Mobile (390px) */
+html:not(.is-client-mode) #canvas-frame:not([data-viewport="tablet"]):not([data-viewport="mobile"]) #canvas-zoom-stage,
+html:not(.is-client-mode) #canvas-frame[data-viewport="desktop"] #canvas-zoom-stage,
+html:not(.is-client-mode) #hp-root:not([data-viewport="tablet"]):not([data-viewport="mobile"]),
+html:not(.is-client-mode) #hp-root[data-viewport="desktop"] {
+  width: 1280px !important;
+  min-width: 1280px !important;
+  max-width: 1280px !important;
+  margin: 0 !important;
+  box-sizing: border-box !important;
+}
+
+html:not(.is-client-mode) #canvas-frame[data-viewport="tablet"] #canvas-zoom-stage,
+html:not(.is-client-mode) #hp-root[data-viewport="tablet"] {
+  width: 768px !important;
+  min-width: 768px !important;
+  max-width: 768px !important;
+  margin: 0 !important;
+  box-sizing: border-box !important;
+}
+
+html:not(.is-client-mode) #canvas-frame[data-viewport="mobile"] #canvas-zoom-stage,
+html:not(.is-client-mode) #hp-root[data-viewport="mobile"] {
+  width: 390px !important;
+  min-width: 390px !important;
+  max-width: 390px !important;
+  margin: 0 !important;
+  box-sizing: border-box !important;
+}
+
+/* Preserve 100% Full-Bleed Responsive Layout in Client Mode (?mode=client) */
+html.is-client-mode #canvas-frame,
+html.is-client-mode #canvas-zoom-sizer,
+html.is-client-mode #canvas-zoom-stage,
+html.is-client-mode #hp-root {
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  transform: none !important;
+  margin: 0 !important;
+  box-shadow: none !important;
+}
+
+/* 3. 8-Handle Selection Box Positioning (Both Class & data-handle Attribute Selectors) */
+.st-ui-sel-handle.nw, .st-ui-sel-handle[data-handle="nw"] { top: -6px; left: -6px; cursor: nwse-resize; }
+.st-ui-sel-handle.n,  .st-ui-sel-handle[data-handle="n"]  { top: -6px; left: calc(50% - 5.5px); cursor: ns-resize; }
+.st-ui-sel-handle.ne, .st-ui-sel-handle[data-handle="ne"] { top: -6px; right: -6px; cursor: nesw-resize; }
+.st-ui-sel-handle.e,  .st-ui-sel-handle[data-handle="e"]  { top: calc(50% - 5.5px); right: -6px; cursor: ew-resize; }
+.st-ui-sel-handle.se, .st-ui-sel-handle[data-handle="se"] { bottom: -6px; right: -6px; cursor: nwse-resize; }
+.st-ui-sel-handle.s,  .st-ui-sel-handle[data-handle="s"]  { bottom: -6px; left: calc(50% - 5.5px); cursor: ns-resize; }
+.st-ui-sel-handle.sw, .st-ui-sel-handle[data-handle="sw"] { bottom: -6px; left: -6px; cursor: nesw-resize; }
+.st-ui-sel-handle.w,  .st-ui-sel-handle[data-handle="w"]  { top: calc(50% - 5.5px); left: -6px; cursor: ew-resize; }
+
+.st-ui-toolbar {
+  flex-wrap: nowrap !important;
+  white-space: nowrap !important;
+  max-height: 36px !important;
+}
+
+/* 4. Multi-Selection Outline, Locked State, Marquee & Magnetic Snap Guides */
+html:not(.is-client-mode) #hp-root [data-selected="true"] {
+  outline: 2px solid #38BDF8 !important;
+  outline-offset: 2px;
+}
+
+html:not(.is-client-mode) #hp-root [data-locked="true"] {
+  cursor: not-allowed !important;
+}
+
+#st-marquee-box {
+  position: fixed;
+  z-index: 9991;
+  pointer-events: none;
+  border: 1.5px solid #38BDF8;
+  background: rgba(56, 189, 248, 0.14);
+  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.2);
+}
+
+#st-snap-guide-x {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  height: 100vh;
+  width: 0;
+  border-left: 1.5px dashed #F43F5E;
+  box-shadow: 0 0 8px rgba(244, 63, 94, 0.65);
+  z-index: 9992;
+  pointer-events: none;
+  display: none;
+}
+
+#st-snap-guide-y {
+  position: fixed;
+  left: 0;
+  right: 0;
+  width: 100vw;
+  height: 0;
+  border-top: 1.5px dashed #F43F5E;
+  box-shadow: 0 0 8px rgba(244, 63, 94, 0.65);
+  z-index: 9992;
+  pointer-events: none;
+  display: none;
+}
+
+/* 5. Docked Right Property Inspector Panel (Editor Mode Only) */
+html:not(.is-client-mode) #st-right-panel {
+  width: 224px;
+  flex-shrink: 0;
+  background: #0E1118;
+  border-left: 1px solid rgba(255, 255, 255, 0.09);
+  color: #E2E8F0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  overflow-x: hidden;
+  user-select: none;
+  z-index: 35;
+}
+
+@media (max-width: 1320px) {
+  html:not(.is-client-mode) #st-right-panel {
+    position: fixed;
+    right: 0;
+    top: 72px;
+    bottom: 0;
+    width: 210px;
+    box-shadow: -12px 0 32px rgba(0, 0, 0, 0.5);
+  }
+}
+
+html.is-client-mode #st-right-panel,
+.st-app.is-presentation #st-right-panel {
+  display: none !important;
+}
+
+.st-insp-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 2px;
+  padding: 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: #0A0C12;
+  flex-shrink: 0;
+}
+
+.st-insp-tab {
+  border: none;
+  background: transparent;
+  color: #94A3B8;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 5px 4px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.st-insp-tab.is-active {
+  background: #1E293B;
+  color: #38BDF8;
+}
+
+.st-insp-sec {
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.st-insp-sec-title {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: #64748B;
+  text-transform: uppercase;
+}
+
+.st-insp-grid2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px;
+}
+
+.st-insp-grid4 {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+}
+
+.st-insp-field {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: #141824;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 6px;
+  padding: 3px 6px;
+}
+
+.st-insp-field label {
+  font-size: 10px;
+  font-weight: 700;
+  color: #64748B;
+  flex-shrink: 0;
+}
+
+.st-insp-field input,
+.st-insp-field select {
+  width: 100%;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: #F8FAFC;
+  font-size: 11px;
+  font-family: 'JetBrains Mono', monospace;
+  outline: none;
+}

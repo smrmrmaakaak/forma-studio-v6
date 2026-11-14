@@ -71,6 +71,7 @@ const state = {
   sidebarOpen: true,
   sideTab: 'slots',
   viewport: 'desktop',      // 'desktop' | 'tablet' | 'mobile'
+  zoom: 1,                  // 0.30 .. 1.50
   guidesOn: true,
   canvasMoveMode: true,     // ON by default: grab & move ANY UI directly on the webpage!
   inlineEdit: false,
@@ -86,8 +87,14 @@ const state = {
   proposalSlot: 'A',
   proposals: makeInitialProposals(),
   undoStack: [],
-  uiOffsets: {},            // { [domPath]: { x, y, scale, hidden } }
-  freeWidgets: [],          // [ { uid, secKey, catKey, assetId, customHTML, xPct, yPx, scale } ]
+  uiOffsets: {},            // { [domPath]: { x, y, scale, width, height, zIndex, bgColor, fgColor, href, hidden } }
+  freeWidgets: [],          // [ { uid, secKey, catKey, assetId, customHTML, xPct, yPx, scale, width, height, zIndex, bgColor, fgColor, href } ]
+  customTexts: {},          // { [domPath]: string }
+  customImages: {},         // { [domPath]: dataUrlOrSrc }
+  secHeights: {},           // { [secKey]: number }
+  customSections: {},       // { [secKey]: { id, type: 'blank' | 'clone', baseCatKey, assetId, title } }
+  responsiveOverrides: { desktop: {}, tablet: {}, mobile: {} },
+  interactions: {},
   selectedUIPath: null,
   selectedFreeUid: null,
   exportTab: 'code',        // 'code' | 'preview'
@@ -96,12 +103,21 @@ const state = {
     radius: 10,
     density: 'balanced',    // 'compact' | 'balanced' | 'editorial'
     grain: 0.035,
-    customAccent: null
+    customAccent: null,
+    customPaletteTokens: null
   },
   secOrder: [...DEFAULT_SEC_ORDER],
   secEnabled: DEFAULT_SEC_ORDER.reduce((acc, k) => { acc[k] = true; return acc; }, {}),
   equipped: { ...WORLDS.maison.preset }
 };
+globalThis.state = typeof window !== 'undefined' ? (window.state = state) : state;
+
+function getCurrentWorldObj() {
+  if (typeof FORMA_PRO !== 'undefined' && FORMA_PRO.BrandRestyler?.getEffectiveWorld) {
+    return FORMA_PRO.BrandRestyler.getEffectiveWorld();
+  }
+  return WORLDS[state.worldKey] || WORLDS.maison;
+}
 
 function getAsset(catKey, id) {
   const list = VAULT[catKey] || [];
@@ -124,15 +140,19 @@ function showStudioToast(msg) {
 }
 
 /* ==========================================================================
-   UNDO HISTORY STACK (Ctrl+Z / ↩) — Covers Theme, Sections, Free UI & Moves!
+   50-STEP UNDO (Ctrl+Z / ↩) & REDO (Ctrl+Y / Ctrl+Shift+Z / ↪)
    ========================================================================== */
 function cloneOffsetsMap(m) {
   const out = {};
-  Object.keys(m || {}).forEach(k => { out[k] = { ...m[k] }; });
+  Object.keys(m || {}).forEach(k => { out[k] = typeof m[k] === 'object' && m[k] !== null ? { ...m[k] } : m[k]; });
   return out;
 }
 
 function pushUndoSnapshot() {
+  if (typeof FORMA_PRO !== 'undefined' && FORMA_PRO.ProjectState?.pushUndoSnapshot) {
+    FORMA_PRO.ProjectState.pushUndoSnapshot();
+    return;
+  }
   state.undoStack.push({
     worldKey: state.worldKey,
     equipped: { ...state.equipped },
@@ -140,13 +160,21 @@ function pushUndoSnapshot() {
     secEnabled: { ...state.secEnabled },
     tokens: { ...state.tokens },
     uiOffsets: cloneOffsetsMap(state.uiOffsets),
-    freeWidgets: state.freeWidgets.map(w => ({ ...w }))
+    freeWidgets: state.freeWidgets.map(w => ({ ...w })),
+    customTexts: { ...state.customTexts },
+    customImages: { ...state.customImages },
+    secHeights: { ...state.secHeights },
+    customSections: cloneOffsetsMap(state.customSections)
   });
-  if (state.undoStack.length > 40) state.undoStack.shift();
+  if (state.undoStack.length > 50) state.undoStack.shift();
   updateUndoButtonUI();
 }
 
 function updateUndoButtonUI() {
+  if (typeof updateUndoRedoButtonsUI === 'function') {
+    updateUndoRedoButtonsUI();
+    return;
+  }
   const btn = document.getElementById('undo-btn');
   if (!btn) return;
   const n = state.undoStack.length;
@@ -155,10 +183,13 @@ function updateUndoButtonUI() {
 }
 
 function undoLastAction() {
+  if (typeof FORMA_PRO !== 'undefined' && FORMA_PRO.ProjectState?.undo) {
+    return FORMA_PRO.ProjectState.undo();
+  }
   const snap = state.undoStack.pop();
   if (!snap) {
     showStudioToast('되돌릴 변경 내역이 없습니다.');
-    return;
+    return false;
   }
   state.worldKey = snap.worldKey;
   state.equipped = { ...snap.equipped };
@@ -167,6 +198,10 @@ function undoLastAction() {
   state.tokens = { ...snap.tokens };
   state.uiOffsets = cloneOffsetsMap(snap.uiOffsets);
   state.freeWidgets = (snap.freeWidgets || []).map(w => ({ ...w }));
+  state.customTexts = { ...(snap.customTexts || {}) };
+  state.customImages = { ...(snap.customImages || {}) };
+  state.secHeights = { ...(snap.secHeights || {}) };
+  state.customSections = cloneOffsetsMap(snap.customSections);
   clearSelectedCanvasUI();
   const sel = document.getElementById('world-select');
   if (sel) sel.value = state.worldKey;
@@ -176,11 +211,57 @@ function undoLastAction() {
   renderLiveWebsite();
   if (state.mode === 'vault') renderVaultView();
   showStudioToast('↩ 이전 UI 상태로 되돌렸습니다.');
+  return true;
+}
+
+function redoLastAction() {
+  if (typeof FORMA_PRO !== 'undefined' && FORMA_PRO.ProjectState?.redo) {
+    return FORMA_PRO.ProjectState.redo();
+  }
+  showStudioToast('다시 실행할 변경 내역이 없습니다.');
+  return false;
 }
 
 /* ==========================================================================
    COMPACT CONTROLS + CLIENT A/B/C COMPARE + FINE-TUNING POPOVER
    ========================================================================== */
+function bindEditablePersistenceInTextMode(site) {
+  if (!site || typeof site.querySelectorAll !== 'function') return;
+  site.querySelectorAll('h1, h2, h3, p, blockquote').forEach(el => {
+    el.contentEditable = state.inlineEdit ? 'true' : 'false';
+    if (state.inlineEdit) {
+      el.onfocus = () => { el._beforeTextEditHTML = el.innerHTML; };
+      el.onblur = () => {
+        if (el._beforeTextEditHTML !== undefined && el.innerHTML !== el._beforeTextEditHTML) {
+          const newHTML = el.innerHTML;
+          el.innerHTML = el._beforeTextEditHTML;
+          const freeWrap = el.closest?.('.f-free-ui');
+          const pathKey = (!freeWrap || !freeWrap.dataset?.uid) ? getElementPathInRoot(el) : null;
+          if (freeWrap && freeWrap.dataset?.uid) {
+            const fw = state.freeWidgets.find(x => x.uid === freeWrap.dataset.uid);
+            if (fw) fw.customHTML = freeWrap.innerHTML;
+          } else if (pathKey) {
+            state.customTexts[pathKey] = el._beforeTextEditHTML;
+          }
+          pushUndoSnapshot();
+          el.innerHTML = newHTML;
+          el._beforeTextEditHTML = newHTML;
+          if (freeWrap && freeWrap.dataset?.uid) {
+            const fw = state.freeWidgets.find(x => x.uid === freeWrap.dataset.uid);
+            if (fw) fw.customHTML = freeWrap.innerHTML;
+          } else if (pathKey) {
+            state.customTexts[pathKey] = newHTML;
+          }
+          FORMA_PRO.ProjectState?.scheduleAutosave?.();
+        }
+      };
+    } else {
+      el.onfocus = null;
+      el.onblur = null;
+    }
+  });
+}
+
 function setCanvasInteractionMode(mode) {
   // mode: 'move' | 'text' | 'preview'
   if (mode === 'preview') {
@@ -200,9 +281,7 @@ function setCanvasInteractionMode(mode) {
   if (site) {
     site.classList.toggle('is-move-mode', state.canvasMoveMode);
     site.classList.toggle('is-editing', state.inlineEdit);
-    site.querySelectorAll('h1, h2, h3, p, blockquote').forEach(el => {
-      el.contentEditable = state.inlineEdit ? 'true' : 'false';
-    });
+    bindEditablePersistenceInTextMode(site);
   }
   renderQuickSubbar();
 }
@@ -263,43 +342,83 @@ function resetAllMovedElements() {
   pushUndoSnapshot();
   state.uiOffsets = {};
   state.freeWidgets = [];
+  state.customTexts = {};
+  state.customImages = {};
+  state.secHeights = {};
   clearSelectedCanvasUI();
   renderLiveWebsite();
-  showStudioToast('모든 UI 위치를 기본 정렬로 초기화했습니다.');
+  FORMA_PRO.ProjectState?.scheduleAutosave?.();
+  showStudioToast('모든 UI 위치와 커스텀 수정을 기본 정렬로 초기화했습니다.');
+}
+
+function saveCurrentToProposalSlot(silent = false) {
+  const slot = state.proposalSlot || 'A';
+  const doc = FORMA_PRO.ProjectState?.getDoc?.();
+  const snap = {
+    label: `시안 ${slot}`,
+    worldKey: state.worldKey,
+    brandProfile: doc?.brandProfile ? deepCloneJSON(doc.brandProfile) : null,
+    equipped: { ...state.equipped },
+    globalEquipped: doc?.globalEquipped ? deepCloneJSON(doc.globalEquipped) : { ...state.equipped },
+    tokens: deepCloneJSON(state.tokens),
+    activePageId: doc?.activePageId || 'page-home',
+    pages: doc?.pages ? deepCloneJSON(doc.pages) : null
+  };
+  state.proposals[slot] = snap;
+  if (doc) {
+    doc.proposals = doc.proposals || {};
+    doc.proposals[slot] = deepCloneJSON(snap);
+  }
+  if (!silent) {
+    renderQuickSubbar();
+    FORMA_PRO.ProjectState?.scheduleAutosave?.();
+    showStudioToast(`시안 ${slot}에 현재 프로젝트 전체 상태 저장 완료`);
+  }
 }
 
 function loadProposalSlot(slot) {
-  const snap = state.proposals[slot];
+  const doc = FORMA_PRO.ProjectState?.getDoc?.();
+  const snap = (doc?.proposals && doc.proposals[slot]) || state.proposals[slot];
   if (!snap) return;
+
+  // Save current state into outgoing proposal slot before switching
+  if (state.proposalSlot && state.proposalSlot !== slot) {
+    saveCurrentToProposalSlot(true);
+  }
   pushUndoSnapshot();
   state.proposalSlot = slot;
-  state.worldKey = snap.worldKey || state.worldKey;
+
+  if (doc) {
+    doc.worldKey = snap.worldKey || doc.worldKey;
+    if (snap.brandProfile !== undefined) doc.brandProfile = deepCloneJSON(snap.brandProfile);
+    doc.equipped = { ...(snap.equipped || doc.equipped) };
+    doc.globalEquipped = snap.globalEquipped ? deepCloneJSON(snap.globalEquipped) : { ...doc.equipped };
+    doc.tokens = deepCloneJSON(snap.tokens || doc.tokens);
+    if (Array.isArray(snap.pages) && snap.pages.length > 0) {
+      doc.pages = deepCloneJSON(snap.pages);
+      doc.activePageId = snap.activePageId || doc.pages[0].id;
+    }
+    FORMA_PRO.ProjectState?.syncPageToEngineState?.(doc);
+  } else {
+    state.worldKey = snap.worldKey || state.worldKey;
+    state.equipped = { ...snap.equipped };
+    state.tokens = { ...snap.tokens };
+  }
+
   const sel = document.getElementById('world-select');
   if (sel) sel.value = state.worldKey;
-  state.equipped = { ...snap.equipped };
-  state.tokens = { ...snap.tokens };
   clearSelectedCanvasUI();
+  if (typeof renderPageTabsUI === 'function') renderPageTabsUI();
   renderQuickSubbar();
   renderSidebarBody();
   renderLiveWebsite();
   if (state.mode === 'vault') renderVaultView();
+  FORMA_PRO.ProjectState?.scheduleAutosave?.();
   showStudioToast(`시안 ${slot} 적용`);
 }
 
-function saveCurrentToProposalSlot() {
-  const slot = state.proposalSlot;
-  state.proposals[slot] = {
-    label: `시안 ${slot}`,
-    worldKey: state.worldKey,
-    equipped: { ...state.equipped },
-    tokens: { ...state.tokens }
-  };
-  renderQuickSubbar();
-  showStudioToast(`시안 ${slot}에 현재 UI 조합 저장 완료`);
-}
-
 /* ==========================================================================
-   MODE, SIDEBAR, VIEWPORT & WORLD CONTROLS
+   MODE, SIDEBAR, VIEWPORT, ZOOM & WORLD CONTROLS
    ========================================================================== */
 let vaultShaderRAF = null;
 let drawerShaderRAF = null;
@@ -377,14 +496,83 @@ function setViewportSize(vp) {
   state.viewport = vp;
   clearSelectedCanvasUI();
   const cf = document.getElementById('canvas-frame');
+  const inClient = Boolean(typeof FORMA_PRO !== 'undefined' && FORMA_PRO.ClientMode?.isClientMode?.());
   if (cf) {
+    cf.dataset.viewport = vp;
+    cf.setAttribute?.('data-viewport', vp);
     cf.classList.remove('vp-tablet', 'vp-mobile');
-    if (vp === 'tablet') cf.classList.add('vp-tablet');
-    if (vp === 'mobile') cf.classList.add('vp-mobile');
+    if (inClient) {
+      if (vp === 'tablet') cf.classList.add('vp-tablet');
+      if (vp === 'mobile') cf.classList.add('vp-mobile');
+    }
+  }
+  const root = document.getElementById('hp-root');
+  if (root) {
+    root.dataset.viewport = vp;
+    root.setAttribute?.('data-viewport', vp);
   }
   ['desktop', 'tablet', 'mobile'].forEach(k => {
     document.getElementById(`vp-btn-${k}`)?.classList.toggle('is-active', k === vp);
   });
+  if (typeof FORMA_PRO !== 'undefined' && FORMA_PRO.ResponsiveEngine?.applyViewportState) {
+    FORMA_PRO.ResponsiveEngine.applyViewportState(vp);
+  }
+  syncSelectedUIOverlay();
+}
+
+function resetCurrentViewportOverride() {
+  if (typeof FORMA_PRO !== 'undefined' && FORMA_PRO.ResponsiveEngine?.resetCurrentViewportOverride) {
+    return FORMA_PRO.ResponsiveEngine.resetCurrentViewportOverride();
+  }
+  const vp = state.viewport || 'desktop';
+  if (vp !== 'desktop' && state.responsiveOverrides && state.responsiveOverrides[vp]) {
+    pushUndoSnapshot();
+    state.responsiveOverrides[vp] = {};
+    renderLiveWebsite();
+    FORMA_PRO.ProjectState?.scheduleAutosave?.();
+    showStudioToast(`↺ ${vp.toUpperCase()} 뷰포트 전용 오버라이드를 초기화했습니다.`);
+  }
+}
+
+function setCanvasZoom(zVal, focalPoint) {
+  if (typeof FORMA_PRO !== 'undefined' && FORMA_PRO.ResponsiveEngine?.setCanvasZoom) {
+    return FORMA_PRO.ResponsiveEngine.setCanvasZoom(zVal, focalPoint);
+  }
+  const clamped = Math.max(0.3, Math.min(1.5, Number(Number(zVal || 1).toFixed(2))));
+  state.zoom = clamped;
+  if (typeof document !== 'undefined') {
+    const cf = document.getElementById('canvas-frame');
+    const stage = document.getElementById('canvas-zoom-stage');
+    const readout = document.getElementById('st-zoom-readout');
+    if (cf) {
+      cf.dataset.zoom = String(clamped);
+      cf.setAttribute?.('data-zoom', String(clamped));
+    }
+    if (stage) {
+      stage.dataset.zoom = String(clamped);
+      stage.setAttribute?.('data-zoom', String(clamped));
+      stage.style.transform = clamped === 1 ? '' : `scale(${clamped})`;
+    }
+    if (readout) {
+      readout.textContent = `${Math.round(clamped * 100)}%`;
+    }
+  }
+  syncSelectedUIOverlay();
+  return clamped;
+}
+
+function stepCanvasZoom(delta, focalPoint) {
+  if (typeof FORMA_PRO !== 'undefined' && FORMA_PRO.ResponsiveEngine?.stepCanvasZoom) {
+    return FORMA_PRO.ResponsiveEngine.stepCanvasZoom(delta, focalPoint);
+  }
+  return setCanvasZoom((state.zoom || 1) + delta, focalPoint);
+}
+
+function zoomCanvasToFit() {
+  if (typeof FORMA_PRO !== 'undefined' && FORMA_PRO.ResponsiveEngine?.fitCanvasZoom) {
+    return FORMA_PRO.ResponsiveEngine.fitCanvasZoom();
+  }
+  return setCanvasZoom(1);
 }
 
 function toggleInlineEdit() {
@@ -397,16 +585,46 @@ function switchWorld(worldKey) {
   pushUndoSnapshot();
   state.worldKey = worldKey;
   state.tokens.customAccent = null;
+  state.tokens.customPaletteTokens = null;
   state.equipped = { ...w.preset };
   state.uiOffsets = {};
   state.freeWidgets = [];
+  state.customTexts = {};
+  state.customImages = {};
+  state.secHeights = {};
+  state.customSections = {};
+  state.secOrder = [...DEFAULT_SEC_ORDER];
+  state.secEnabled = DEFAULT_SEC_ORDER.reduce((acc, k) => { acc[k] = true; return acc; }, {});
   state.reviewIdx = 0;
+
+  if (typeof FORMA_PRO !== 'undefined' && FORMA_PRO.ProjectState) {
+    const doc = FORMA_PRO.ProjectState.getDoc();
+    doc.worldKey = worldKey;
+    doc.brandProfile = {
+      customApplied: false,
+      brandName: w.brand,
+      slogan: w.eyebrow,
+      primaryColor: '#8C5A32',
+      mood: 'light',
+      fontPairingId: w.preset?.font || 'FNT-01',
+      harmonicTokens: null
+    };
+    doc.tokens.customAccent = null;
+    doc.tokens.customPaletteTokens = null;
+    doc.equipped = { ...w.preset };
+    doc.pages = FORMA_PRO.ProjectState.makeDefaultPagesForWorld(worldKey);
+    doc.activePageId = doc.pages[0].id;
+    FORMA_PRO.ProjectState.syncPageToEngineState(doc);
+  }
+
   clearSelectedCanvasUI();
+  if (typeof renderPageTabsUI === 'function') renderPageTabsUI();
   renderQuickSubbar();
   renderSidebarBody();
   renderLiveWebsite();
   if (state.mode === 'vault') renderVaultView();
   document.getElementById('canvas-frame')?.scrollTo({ top: 0, behavior: 'smooth' });
+  FORMA_PRO.ProjectState?.scheduleAutosave?.();
   showStudioToast(`${w.brand} UI 로드 완료`);
 }
 
@@ -421,11 +639,13 @@ function randomizeCombination() {
     }
   });
   state.tokens.customAccent = null;
+  state.tokens.customPaletteTokens = null;
   clearSelectedCanvasUI();
   renderQuickSubbar();
   renderSidebarBody();
   renderLiveWebsite();
   if (state.mode === 'vault') renderVaultView();
+  FORMA_PRO.ProjectState?.scheduleAutosave?.();
   showStudioToast('🎲 랜덤 UI 조합 적용!');
 }
 
@@ -459,8 +679,9 @@ function selectSlotCategory(catKey) {
 }
 
 function focusDrawerCategory(catKey) {
+  const baseKey = state.customSections[catKey]?.baseCatKey || catKey;
   setStudioMode('builder');
-  selectSlotCategory(catKey);
+  selectSlotCategory(baseKey);
 }
 
 function setDrawerSearch(q) {
@@ -470,7 +691,10 @@ function setDrawerSearch(q) {
 
 function equipAsset(catKey, assetId, jumpToBuilder = false) {
   state.equipped[catKey] = assetId;
-  if (catKey === 'palette') state.tokens.customAccent = null;
+  if (catKey === 'palette') {
+    state.tokens.customAccent = null;
+    state.tokens.customPaletteTokens = null;
+  }
   if (CATEGORIES.find(c => c.key === catKey)?.group === 'section') {
     state.secEnabled[catKey] = true;
   }
@@ -478,6 +702,7 @@ function equipAsset(catKey, assetId, jumpToBuilder = false) {
   renderQuickSubbar();
   renderSidebarBody();
   renderLiveWebsite();
+  FORMA_PRO.ProjectState?.scheduleAutosave?.();
 
   if (state.mode === 'vault') {
     if (jumpToBuilder) setStudioMode('builder');
@@ -492,7 +717,7 @@ function equipAsset(catKey, assetId, jumpToBuilder = false) {
     setTimeout(() => {
       const targetEl = document.getElementById(meta.secId);
       if (targetEl) {
-        targetEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        targetEl.scrollIntoView({ behavior: 'auto', block: 'nearest' });
         targetEl.classList.add('is-just-applied');
         setTimeout(() => targetEl.classList.remove('is-just-applied'), 900);
       }
@@ -504,9 +729,102 @@ function cycleSlot(catKey, dir, ev) {
   if (ev) ev.stopPropagation();
   const list = VAULT[catKey] || [];
   if (!list.length) return;
+  pushUndoSnapshot();
   const idx = list.findIndex(x => x.id === state.equipped[catKey]);
   const next = list[(idx + dir + list.length) % list.length];
   equipAsset(catKey, next.id);
+}
+
+function addBlankCanvasSection(afterSecKey) {
+  pushUndoSnapshot();
+  const blankKey = 'blank-' + Date.now().toString(36) + '-' + Math.floor(Math.random() * 999);
+  state.customSections[blankKey] = {
+    id: blankKey,
+    type: 'blank',
+    baseCatKey: 'hero',
+    assetId: 'BLANK',
+    title: '자유 캔버스 섹션'
+  };
+  state.secEnabled[blankKey] = true;
+  state.secHeights[blankKey] = 440;
+  state.lastAddedSecKey = blankKey;
+  const ref = afterSecKey || (state.secOrder.includes('hero') ? 'hero' : state.secOrder[0]);
+  const idx = state.secOrder.indexOf(ref);
+  if (idx >= 0) state.secOrder.splice(idx + 1, 0, blankKey);
+  else state.secOrder.unshift(blankKey);
+  clearSelectedCanvasUI();
+  renderSidebarBody();
+  renderLiveWebsite();
+  FORMA_PRO.ProjectState?.scheduleAutosave?.();
+  const el = typeof document !== 'undefined' ? document.getElementById('sec-' + blankKey) : null;
+  if (el) {
+    el.scrollIntoView?.({ behavior: 'auto', block: 'center' });
+    el.classList.add('is-just-applied');
+  }
+  showStudioToast('✨ 빈 자유 캔버스 섹션이 추가되었습니다! 원하는 UI나 사진을 마음껏 올려보세요.');
+  return blankKey;
+}
+
+function duplicateSectionInstance(secKey) {
+  pushUndoSnapshot();
+  const existingCustom = state.customSections[secKey];
+  const baseCatKey = existingCustom ? existingCustom.baseCatKey : secKey;
+  const cloneKey = 'clone-' + baseCatKey + '-' + Date.now().toString(36) + '-' + Math.floor(Math.random() * 999);
+  state.customSections[cloneKey] = {
+    id: cloneKey,
+    type: existingCustom?.type === 'blank' ? 'blank' : 'clone',
+    baseCatKey,
+    assetId: existingCustom?.assetId || state.equipped[baseCatKey],
+    title: existingCustom?.title || '복제 섹션'
+  };
+  state.secEnabled[cloneKey] = true;
+  if (state.secHeights[secKey]) {
+    state.secHeights[cloneKey] = state.secHeights[secKey];
+  }
+  // Also duplicate any free widgets placed inside the original section!
+  const clonedWidgets = state.freeWidgets
+    .filter(fw => fw.secKey === secKey)
+    .map(fw => ({
+      ...fw,
+      uid: 'fw-' + Date.now() + '-' + Math.floor(Math.random() * 9999),
+      secKey: cloneKey
+    }));
+  state.freeWidgets.push(...clonedWidgets);
+
+  // Also duplicate any customTexts, customImages, and uiOffsets scoped to #sec-${secKey}>
+  const oldPrefix = `#sec-${secKey}>`;
+  const newPrefix = `#sec-${cloneKey}>`;
+  Object.keys(state.uiOffsets || {}).forEach(k => {
+    if (k.startsWith(oldPrefix)) {
+      state.uiOffsets[newPrefix + k.slice(oldPrefix.length)] = { ...state.uiOffsets[k] };
+    }
+  });
+  Object.keys(state.customTexts || {}).forEach(k => {
+    if (k.startsWith(oldPrefix)) {
+      state.customTexts[newPrefix + k.slice(oldPrefix.length)] = state.customTexts[k];
+    }
+  });
+  Object.keys(state.customImages || {}).forEach(k => {
+    if (k.startsWith(oldPrefix)) {
+      state.customImages[newPrefix + k.slice(oldPrefix.length)] = state.customImages[k];
+    }
+  });
+
+  const idx = state.secOrder.indexOf(secKey);
+  if (idx >= 0) state.secOrder.splice(idx + 1, 0, cloneKey);
+  else state.secOrder.push(cloneKey);
+
+  clearSelectedCanvasUI();
+  renderSidebarBody();
+  renderLiveWebsite();
+  FORMA_PRO.ProjectState?.scheduleAutosave?.();
+  setTimeout(() => {
+    const el = document.getElementById('sec-' + cloneKey);
+    el?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    el?.classList.add('is-just-applied');
+  }, 40);
+  showStudioToast('⎘ 섹션이 아래에 하나 더 복제되었습니다!');
+  return cloneKey;
 }
 
 function moveSectionOrder(secKey, dir) {
@@ -520,6 +838,7 @@ function moveSectionOrder(secKey, dir) {
   clearSelectedCanvasUI();
   renderSidebarBody();
   renderLiveWebsite();
+  FORMA_PRO.ProjectState?.scheduleAutosave?.();
 }
 
 function toggleSectionVisible(secKey) {
@@ -528,6 +847,7 @@ function toggleSectionVisible(secKey) {
   clearSelectedCanvasUI();
   renderSidebarBody();
   renderLiveWebsite();
+  FORMA_PRO.ProjectState?.scheduleAutosave?.();
 }
 
 function hideSectionWithUndo(secKey) {
@@ -536,6 +856,7 @@ function hideSectionWithUndo(secKey) {
   clearSelectedCanvasUI();
   renderSidebarBody();
   renderLiveWebsite();
+  FORMA_PRO.ProjectState?.scheduleAutosave?.();
 }
 
 function restoreHiddenSection(secKey) {
@@ -544,17 +865,29 @@ function restoreHiddenSection(secKey) {
   clearSelectedCanvasUI();
   renderSidebarBody();
   renderLiveWebsite();
+  FORMA_PRO.ProjectState?.scheduleAutosave?.();
   setTimeout(() => document.getElementById('sec-' + secKey)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50);
 }
 
+let tokenCoalesceTimer = null;
 function updateToken(key, val) {
+  if (!tokenCoalesceTimer) {
+    pushUndoSnapshot();
+  }
+  clearTimeout(tokenCoalesceTimer);
+  tokenCoalesceTimer = setTimeout(() => { tokenCoalesceTimer = null; }, 450);
+
   if (key === 'radius') state.tokens.radius = Number(val);
   if (key === 'density') state.tokens.density = val;
   if (key === 'grain') state.tokens.grain = Number(val);
-  if (key === 'customAccent') state.tokens.customAccent = val;
+  if (key === 'customAccent') {
+    state.tokens.customAccent = val;
+    state.tokens.customPaletteTokens = null;
+  }
   if (key === 'guidesOn') state.guidesOn = Boolean(val);
   renderTunePopover();
   renderLiveWebsite();
+  FORMA_PRO.ProjectState?.scheduleAutosave?.();
 }
 
 /* ==========================================================================
@@ -563,7 +896,7 @@ function updateToken(key, val) {
 const SAMPLE_BTN_LABELS = ['예약하기 →', '시작하기 ↗', '컬렉션 보기', '무료 체험', '상담 신청 →', 'VIEW MORE'];
 
 function renderFreeComponentHTML(catKey, item) {
-  const w = WORLDS[state.worldKey] || WORLDS.maison;
+  const w = getCurrentWorldObj();
   const ctx = {
     bdgCls: getAsset('badge', state.equipped.badge).cls,
     tfxId: state.equipped.textfx,
@@ -601,7 +934,7 @@ function renderFreeComponentHTML(catKey, item) {
 }
 
 function renderDrawerVisualStage(catKey, item) {
-  const w     = WORLDS[state.worldKey] || WORLDS.maison;
+  const w     = getCurrentWorldObj();
   const pal   = getAsset('palette', state.equipped.palette);
   const fnt   = getAsset('font', state.equipped.font);
   const tfx   = getAsset('textfx', state.equipped.textfx);
@@ -829,7 +1162,8 @@ function renderDrawerCardsOnly() {
     if (hiddenKeys.length > 0) {
       hiddenBar.style.display = 'flex';
       hiddenBar.innerHTML = hiddenKeys.map(k => {
-        const m = CATEGORIES.find(c => c.key === k);
+        const customSec = state.customSections[k];
+        const m = CATEGORIES.find(c => c.key === (customSec?.baseCatKey || k)) || { icon: '⬜', shortName: customSec?.title || '자유섹션' };
         return `<button type="button" onclick="restoreHiddenSection('${k}')" class="st-pill-btn" style="padding:3px 8px;font-size:11px;">+ ${m.icon} ${m.shortName}</button>`;
       }).join('');
     } else {
@@ -842,7 +1176,11 @@ function renderDrawerCardsOnly() {
 }
 
 function renderSidebarBody() {
-  const railEl = document.getElementById('st-cat-rail');
+  if (typeof FORMA_PRO !== 'undefined' && FORMA_PRO.ClientMode?.isClientMode?.()) {
+    const cardsEl = document.getElementById('st-drawer-cards');
+    if (cardsEl) cardsEl.innerHTML = '';
+    return;
+  }
   const headEl = document.getElementById('st-drawer-cat-head');
 
   ['sections', 'components', 'themes'].forEach(g => {
@@ -859,12 +1197,11 @@ function renderSidebarBody() {
     }).join('');
 
   if (headEl) headEl.innerHTML = chipsHTML;
-  if (railEl) railEl.innerHTML = chipsHTML;
   renderDrawerCardsOnly();
 }
 
 /* ==========================================================================
-   DIRECT ON-CANVAS UI SELECTION, FREE X/Y MOVE, SCALE, DUPLICATE & DELETE
+   DIRECT ON-CANVAS UI SELECTION, 8-HANDLE RESIZE, SNAP GUIDES & INSPECTOR
    ========================================================================== */
 function getElementPathInRoot(el) {
   const root = document.getElementById('hp-root');
@@ -883,10 +1220,56 @@ function getElementPathInRoot(el) {
   }
   return parts.join('>');
 }
+globalThis.getElementPathInRoot = typeof window !== 'undefined' ? (window.getElementPathInRoot = getElementPathInRoot) : getElementPathInRoot;
+
+function applyDimensionToFreeWidgetEl(el, wPx, hPx) {
+  if (!el) return;
+  if (wPx) el.style.width = `${Math.round(wPx)}px`;
+  if (hPx) el.style.height = `${Math.round(hPx)}px`;
+  const inner = el.children && el.children[0];
+  if (inner && inner.style) {
+    if (wPx) inner.style.width = '100%';
+    if (hPx) inner.style.height = '100%';
+    const media = inner.querySelector ? inner.querySelector('.f-media') : null;
+    if (media && media.style && hPx) {
+      media.style.width = '100%';
+      media.style.height = '100%';
+    }
+  }
+}
 
 function applyStoredUIOffsets() {
   const root = document.getElementById('hp-root');
   if (!root || typeof root.querySelector !== 'function') return;
+
+  // 1. Apply custom text edits (persisted from double-click inline editing)
+  Object.entries(state.customTexts || {}).forEach(([path, htmlTxt]) => {
+    if (!path) return;
+    let el = null;
+    try { el = root.querySelector(path); } catch (_) {}
+    if (el && typeof htmlTxt === 'string') {
+      el.innerHTML = htmlTxt;
+    }
+  });
+
+  // 2. Apply custom uploaded / swapped photos (resolving deduplicated customAssets refs)
+  Object.entries(state.customImages || {}).forEach(([path, rawSrc]) => {
+    if (!path || !rawSrc) return;
+    const src = (typeof FORMA_PRO !== 'undefined' && FORMA_PRO.ProjectState?.resolveAssetRef)
+      ? FORMA_PRO.ProjectState.resolveAssetRef(rawSrc)
+      : rawSrc;
+    let el = null;
+    try { el = root.querySelector(path); } catch (_) {}
+    if (!el) return;
+    if (el.tagName === 'IMG') {
+      el.src = src;
+    } else {
+      const img = el.querySelector ? el.querySelector('img') : null;
+      if (img) img.src = src;
+    }
+  });
+
+  // 3. Apply offsets, 8-handle width/height, custom colors, zIndex, and links
   Object.entries(state.uiOffsets || {}).forEach(([path, cfg]) => {
     if (!path) return;
     let el = null;
@@ -896,13 +1279,25 @@ function applyStoredUIOffsets() {
       el.style.display = 'none';
       return;
     }
+    if (cfg.width) el.style.width = `${Math.round(cfg.width)}px`;
+    if (cfg.height) el.style.height = `${Math.round(cfg.height)}px`;
+    if (cfg.bgColor) {
+      el.style.backgroundColor = cfg.bgColor;
+    }
+    if (cfg.fgColor) {
+      el.style.color = cfg.fgColor;
+    }
+    if (cfg.href) {
+      el.dataset.customHref = cfg.href;
+      if (el.tagName === 'A') el.setAttribute?.('href', cfg.href);
+    }
     const x = cfg.x || 0;
     const y = cfg.y || 0;
     const sc = cfg.scale || 1;
-    if (x !== 0 || y !== 0 || sc !== 1) {
+    if (x !== 0 || y !== 0 || sc !== 1 || cfg.zIndex) {
       el.dataset.uiMoved = '1';
       if (!el.style.position) el.style.position = 'relative';
-      el.style.zIndex = '24';
+      el.style.zIndex = String(cfg.zIndex || 24);
       el.style.transform = `translate3d(${x}px, ${y}px, 0) scale(${sc})`;
     }
   });
@@ -910,42 +1305,102 @@ function applyStoredUIOffsets() {
 
 function inferCategoryForCanvasElement(el) {
   if (!el) return 'hero';
-  if (el.dataset?.freeCat) return el.dataset.freeCat;
+  if (el.dataset?.freeCat && el.dataset.freeCat !== 'text') return el.dataset.freeCat;
+  if (el.dataset?.freeCat === 'text') return 'font';
   if (el.classList?.contains('f-btn')) return 'button';
   if (el.classList?.contains('f-bdg')) return 'badge';
   if (el.classList?.contains('f-media')) return 'imgstyle';
   if (el.classList?.contains('f-card')) return 'surface';
-  if (el.tagName === 'H1' || el.tagName === 'H2') return 'font';
+  if (el.classList?.contains('f-input')) return 'inputui';
+  if (el.tagName === 'H1' || el.tagName === 'H2' || el.tagName === 'H3') return 'font';
   const sec = el.closest?.('.f-sec-wrap');
-  return sec?.dataset?.secKey || 'hero';
+  const secKey = sec?.dataset?.secKey || 'hero';
+  return state.customSections[secKey]?.baseCatKey || secKey;
 }
 
 let selectedCanvasEl = null;
+
+function setPrimarySelectedCanvasEl(el) {
+  selectedCanvasEl = el || null;
+  if (!el) {
+    state.selectedFreeUid = null;
+    state.selectedUIPath = null;
+  } else if (el.classList?.contains('f-free-ui') || String(el.className || '').includes('f-free-ui')) {
+    state.selectedFreeUid = el.dataset.uid;
+    state.selectedUIPath = null;
+  } else {
+    state.selectedFreeUid = null;
+    state.selectedUIPath = getElementPathInRoot(el);
+  }
+}
+globalThis.setPrimarySelectedCanvasEl = typeof window !== 'undefined' ? (window.setPrimarySelectedCanvasEl = setPrimarySelectedCanvasEl) : setPrimarySelectedCanvasEl;
+
+function hideMagneticSnapGuides() {
+  const gx = document.getElementById('st-snap-guide-x');
+  const gy = document.getElementById('st-snap-guide-y');
+  if (gx) gx.style.display = 'none';
+  if (gy) gy.style.display = 'none';
+}
 
 function syncSelectedUIOverlay() {
   const box = document.getElementById('st-ui-sel-box');
   const bar = document.getElementById('st-ui-toolbar');
   if (!box || !bar) return;
-  if (!selectedCanvasEl || !selectedCanvasEl.isConnected) {
+
+  const selEls = (typeof FORMA_PRO !== 'undefined' && FORMA_PRO.SelectionEngine?.getSelectedElements)
+    ? FORMA_PRO.SelectionEngine.getSelectedElements()
+    : (selectedCanvasEl && selectedCanvasEl.isConnected ? [selectedCanvasEl] : []);
+
+  if (selEls.length === 0 && (!selectedCanvasEl || !selectedCanvasEl.isConnected)) {
     box.style.display = 'none';
     bar.style.display = 'none';
     return;
   }
-  const r = selectedCanvasEl.getBoundingClientRect();
-  if (r.width < 2 && r.height < 2) {
+
+  const activeList = selEls.length > 0 ? selEls : [selectedCanvasEl];
+  let minLeft = Infinity;
+  let minTop = Infinity;
+  let maxRight = -Infinity;
+  let maxBottom = -Infinity;
+
+  activeList.forEach(el => {
+    if (!el || !el.isConnected) return;
+    const er = el.getBoundingClientRect();
+    if (er.width < 1 && er.height < 1) return;
+    minLeft = Math.min(minLeft, er.left);
+    minTop = Math.min(minTop, er.top);
+    maxRight = Math.max(maxRight, er.right);
+    maxBottom = Math.max(maxBottom, er.bottom);
+  });
+
+  if (!Number.isFinite(minLeft) || (maxRight - minLeft < 2 && maxBottom - minTop < 2)) {
     box.style.display = 'none';
     bar.style.display = 'none';
     return;
   }
+
+  const unionW = maxRight - minLeft;
+  const unionH = maxBottom - minTop;
+  const z = (typeof FORMA_PRO !== 'undefined' && FORMA_PRO.ResponsiveEngine?.getCanvasZoom)
+    ? FORMA_PRO.ResponsiveEngine.getCanvasZoom()
+    : (state.zoom || 1);
+
   box.style.display = 'block';
-  box.style.left = `${r.left - 4}px`;
-  box.style.top = `${r.top - 4}px`;
-  box.style.width = `${r.width + 8}px`;
-  box.style.height = `${r.height + 8}px`;
+  box.style.left = `${minLeft - 4}px`;
+  box.style.top = `${minTop - 4}px`;
+  box.style.width = `${unionW + 8}px`;
+  box.style.height = `${unionH + 8}px`;
+
+  const sizeBadge = document.getElementById('st-ui-size-badge');
+  if (sizeBadge) {
+    sizeBadge.textContent = `${Math.round(unionW / z)} × ${Math.round(unionH / z)}`;
+  }
 
   bar.style.display = 'inline-flex';
-  const barTop = r.top > 92 ? (r.top - 42) : (r.bottom + 10);
-  const barLeft = Math.max(12, Math.min((typeof window !== 'undefined' ? window.innerWidth - 220 : 800), r.left));
+  const barH = bar.offsetHeight || 34;
+  const barTop = minTop > (76 + barH + 12) ? (minTop - barH - 12) : (maxBottom + 28);
+  const maxLeft = typeof window !== 'undefined' ? Math.max(12, window.innerWidth - 460) : 640;
+  const barLeft = Math.max(12, Math.min(maxLeft, minLeft));
   bar.style.top = `${barTop}px`;
   bar.style.left = `${barLeft}px`;
 }
@@ -954,25 +1409,42 @@ function clearSelectedCanvasUI() {
   selectedCanvasEl = null;
   state.selectedUIPath = null;
   state.selectedFreeUid = null;
+  if (typeof FORMA_PRO !== 'undefined' && FORMA_PRO.SelectionEngine?.getSelection?.().length) {
+    FORMA_PRO.SelectionEngine.clearSelection();
+  } else if (typeof document !== 'undefined') {
+    document.querySelectorAll?.('#hp-root [data-selected]').forEach(el => el.removeAttribute('data-selected'));
+  }
   const box = document.getElementById('st-ui-sel-box');
   const bar = document.getElementById('st-ui-toolbar');
+  const photoPop = document.getElementById('st-photo-popover');
+  const mq = document.getElementById('st-marquee-box');
   if (box) box.style.display = 'none';
   if (bar) bar.style.display = 'none';
+  if (photoPop) photoPop.classList.remove('is-open');
+  if (mq) mq.style.display = 'none';
+  hideMagneticSnapGuides();
 }
 
-function selectCanvasUIElement(el) {
-  selectedCanvasEl = el;
+function selectCanvasUIElement(el, opts = {}) {
+  const photoPop = document.getElementById('st-photo-popover');
+  if (photoPop) photoPop.classList.remove('is-open');
   if (!el) {
     clearSelectedCanvasUI();
     return;
   }
-  if (el.classList?.contains('f-free-ui')) {
-    state.selectedFreeUid = el.dataset.uid;
-    state.selectedUIPath = null;
-  } else {
-    state.selectedFreeUid = null;
-    state.selectedUIPath = getElementPathInRoot(el);
+  if (typeof FORMA_PRO !== 'undefined' && FORMA_PRO.SelectionEngine) {
+    if (opts.toggle || opts.shiftKey) {
+      FORMA_PRO.SelectionEngine.toggleSelection(el);
+    } else {
+      FORMA_PRO.SelectionEngine.selectSingle(el);
+    }
+    if (!selectedCanvasEl && el && el.isConnected !== false) {
+      setPrimarySelectedCanvasEl(el);
+      syncSelectedUIOverlay();
+    }
+    return;
   }
+  setPrimarySelectedCanvasEl(el);
   syncSelectedUIOverlay();
 }
 
@@ -988,16 +1460,543 @@ function scaleSelectedUI(delta) {
   if (state.selectedFreeUid) {
     const fw = state.freeWidgets.find(x => x.uid === state.selectedFreeUid);
     if (!fw) return;
-    fw.scale = Math.max(0.6, Math.min(1.85, Number(((fw.scale || 1) + delta).toFixed(2))));
+    fw.scale = Math.max(0.5, Math.min(2.4, Number(((fw.scale || 1) + delta).toFixed(2))));
     selectedCanvasEl.style.transform = `scale(${fw.scale})`;
   } else if (state.selectedUIPath) {
     const cur = state.uiOffsets[state.selectedUIPath] || { x: 0, y: 0, scale: 1 };
-    const nextScale = Math.max(0.6, Math.min(1.85, Number(((cur.scale || 1) + delta).toFixed(2))));
+    const nextScale = Math.max(0.5, Math.min(2.4, Number(((cur.scale || 1) + delta).toFixed(2))));
     state.uiOffsets[state.selectedUIPath] = { ...cur, scale: nextScale };
     selectedCanvasEl.dataset.uiMoved = '1';
     selectedCanvasEl.style.transform = `translate3d(${cur.x || 0}px, ${cur.y || 0}px, 0) scale(${nextScale})`;
   }
   syncSelectedUIOverlay();
+}
+
+/* 8-Direction Direct Width/Height Resize Helper (Programmatic + Handle Drag) */
+function resizeSelectedUI(dw, dh, handle = 'se') {
+  if (!selectedCanvasEl) return;
+  pushUndoSnapshot();
+  const r = selectedCanvasEl.getBoundingClientRect();
+  let nw = Math.max(28, Math.round((r.width || 120) + dw));
+  let nh = Math.max(20, Math.round((r.height || 44) + dh));
+
+  if (state.selectedFreeUid) {
+    const fw = state.freeWidgets.find(x => x.uid === state.selectedFreeUid);
+    if (!fw) return;
+    fw.width = nw;
+    fw.height = nh;
+    if (handle.includes('w')) {
+      const secWrap = selectedCanvasEl.closest?.('.f-sec-wrap');
+      const sw = Math.max(1, secWrap?.getBoundingClientRect()?.width || 856);
+      fw.xPct = Math.max(0, Math.min(92, fw.xPct - (dw / sw) * 100));
+      selectedCanvasEl.style.left = `${fw.xPct}%`;
+    }
+    if (handle.includes('n')) {
+      fw.yPx = Math.max(0, Math.round(fw.yPx - dh));
+      selectedCanvasEl.style.top = `${fw.yPx}px`;
+    }
+    applyDimensionToFreeWidgetEl(selectedCanvasEl, nw, nh);
+  } else if (state.selectedUIPath) {
+    const cur = state.uiOffsets[state.selectedUIPath] || { x: 0, y: 0, scale: 1 };
+    const nx = handle.includes('w') ? Math.round((cur.x || 0) - dw) : (cur.x || 0);
+    const ny = handle.includes('n') ? Math.round((cur.y || 0) - dh) : (cur.y || 0);
+    state.uiOffsets[state.selectedUIPath] = { ...cur, x: nx, y: ny, width: nw, height: nh };
+    selectedCanvasEl.style.width = `${nw}px`;
+    selectedCanvasEl.style.height = `${nh}px`;
+    selectedCanvasEl.dataset.uiMoved = '1';
+    selectedCanvasEl.style.transform = `translate3d(${nx}px, ${ny}px, 0) scale(${cur.scale || 1})`;
+  }
+  if (selectedCanvasEl._rect) {
+    selectedCanvasEl._rect = {
+      ...selectedCanvasEl._rect,
+      width: nw,
+      height: nh,
+      right: (selectedCanvasEl._rect.left || 0) + nw,
+      bottom: (selectedCanvasEl._rect.top || 0) + nh
+    };
+  }
+  syncSelectedUIOverlay();
+}
+
+/* Per-Element Custom Color, Layer (Z-Index), and Link Controls */
+function setSelectedUICustomStyle(prop, val) {
+  if (!selectedCanvasEl) return;
+  pushUndoSnapshot();
+  const targetVisual = selectedCanvasEl.classList?.contains('f-free-ui')
+    ? (selectedCanvasEl.children?.[0] || selectedCanvasEl)
+    : selectedCanvasEl;
+
+  if (prop === 'bgColor') {
+    targetVisual.style.backgroundColor = val;
+  } else if (prop === 'fgColor') {
+    targetVisual.style.color = val;
+  }
+
+  if (state.selectedFreeUid) {
+    const fw = state.freeWidgets.find(x => x.uid === state.selectedFreeUid);
+    if (fw) {
+      fw[prop] = val;
+      if (selectedCanvasEl.innerHTML) fw.customHTML = selectedCanvasEl.innerHTML;
+    }
+  } else if (state.selectedUIPath) {
+    const cur = state.uiOffsets[state.selectedUIPath] || { x: 0, y: 0, scale: 1 };
+    state.uiOffsets[state.selectedUIPath] = { ...cur, [prop]: val };
+  }
+  syncSelectedUIOverlay();
+}
+
+function shiftSelectedUILayer(dir) {
+  if (!selectedCanvasEl) return;
+  pushUndoSnapshot();
+  if (state.selectedFreeUid) {
+    const fw = state.freeWidgets.find(x => x.uid === state.selectedFreeUid);
+    if (!fw) return;
+    fw.zIndex = Math.max(5, Math.min(90, (fw.zIndex || 28) + dir * 5));
+    selectedCanvasEl.style.zIndex = String(fw.zIndex);
+    showStudioToast(dir > 0 ? '⬆ 요소를 앞으로 가져왔습니다.' : '⬇ 요소를 뒤로 보냈습니다.');
+  } else if (state.selectedUIPath) {
+    const cur = state.uiOffsets[state.selectedUIPath] || { x: 0, y: 0, scale: 1 };
+    const nextZ = Math.max(5, Math.min(90, (cur.zIndex || 24) + dir * 5));
+    state.uiOffsets[state.selectedUIPath] = { ...cur, zIndex: nextZ };
+    if (!selectedCanvasEl.style.position) selectedCanvasEl.style.position = 'relative';
+    selectedCanvasEl.style.zIndex = String(nextZ);
+    showStudioToast(dir > 0 ? '⬆ 요소를 앞으로 가져왔습니다.' : '⬇ 요소를 뒤로 보냈습니다.');
+  }
+}
+
+function setSelectedUILink(hrefVal) {
+  if (!selectedCanvasEl) return;
+  pushUndoSnapshot();
+  const cleanHref = String(hrefVal || '').trim();
+  if (state.selectedFreeUid) {
+    const fw = state.freeWidgets.find(x => x.uid === state.selectedFreeUid);
+    if (fw) fw.href = cleanHref;
+    selectedCanvasEl.dataset.customHref = cleanHref;
+  } else if (state.selectedUIPath) {
+    const cur = state.uiOffsets[state.selectedUIPath] || { x: 0, y: 0, scale: 1 };
+    state.uiOffsets[state.selectedUIPath] = { ...cur, href: cleanHref };
+    selectedCanvasEl.dataset.customHref = cleanHref;
+    if (selectedCanvasEl.tagName === 'A') selectedCanvasEl.setAttribute?.('href', cleanHref);
+  }
+  showStudioToast(cleanHref ? `🔗 클릭 이동 링크 설정 완료: ${cleanHref}` : '링크가 해제되었습니다.');
+}
+
+function promptSelectedUILink() {
+  if (!selectedCanvasEl) return;
+  openPhotoPickerForSelectedUI('link');
+}
+
+/* Unified Double-Click Inline Text Editing + Add Free Text Block & Box */
+function startInlineTextEditOnElement(el) {
+  if (!el) return;
+  const editTarget = el.classList?.contains('f-free-ui')
+    ? (el.querySelector?.('.f-h2, .f-card, h1, h2, h3, p, span, button, a, div') || el)
+    : el;
+
+  const origHTML = editTarget.innerHTML;
+  editTarget.contentEditable = 'true';
+  editTarget.dataset.liveEditing = '1';
+  editTarget.focus?.();
+
+  const syncLiveTextToState = () => {
+    const freeWrap = editTarget.closest?.('.f-free-ui') || (el.classList?.contains('f-free-ui') ? el : null);
+    if (freeWrap && freeWrap.dataset?.uid) {
+      const fw = state.freeWidgets.find(x => x.uid === freeWrap.dataset.uid);
+      if (fw) fw.customHTML = freeWrap.innerHTML;
+    } else {
+      const pathKey = getElementPathInRoot(editTarget);
+      if (pathKey) state.customTexts[pathKey] = editTarget.innerHTML;
+    }
+  };
+
+  editTarget.oninput = () => {
+    syncLiveTextToState();
+    FORMA_PRO.ProjectState?.scheduleAutosave?.();
+  };
+
+  let finished = false;
+  const finishEdit = () => {
+    if (finished) return;
+    finished = true;
+    editTarget.onblur = null;
+    editTarget.oninput = null;
+    editTarget.contentEditable = state.inlineEdit ? 'true' : 'false';
+    delete editTarget.dataset.liveEditing;
+    const newHTML = editTarget.innerHTML;
+    if (newHTML !== origHTML) {
+      // Temporarily restore origHTML so pushUndoSnapshot records the pre-edit state!
+      editTarget.innerHTML = origHTML;
+      const freeWrap0 = editTarget.closest?.('.f-free-ui') || (el.classList?.contains('f-free-ui') ? el : null);
+      if (freeWrap0 && freeWrap0.dataset?.uid) {
+        const fw0 = state.freeWidgets.find(x => x.uid === freeWrap0.dataset.uid);
+        if (fw0) fw0.customHTML = freeWrap0.innerHTML;
+      } else {
+        const pk0 = getElementPathInRoot(editTarget);
+        if (pk0) state.customTexts[pk0] = origHTML;
+      }
+      pushUndoSnapshot();
+      editTarget.innerHTML = newHTML;
+    }
+    syncLiveTextToState();
+    syncSelectedUIOverlay();
+    if (state.inlineEdit) {
+      bindEditablePersistenceInTextMode(document.getElementById('hp-root'));
+    }
+    FORMA_PRO.ProjectState?.scheduleAutosave?.();
+  };
+
+  editTarget.onblur = finishEdit;
+}
+
+function editSelectedUITextInline() {
+  if (!selectedCanvasEl) return;
+  startInlineTextEditOnElement(selectedCanvasEl);
+  showStudioToast('✏️ 바로 타이핑하여 글자를 수정하세요! (바깥 클릭 시 자동 저장)');
+}
+
+function resolveDefaultFreeWidgetSecKey(targetSecKey) {
+  if (targetSecKey) return targetSecKey;
+  const fromSel = selectedCanvasEl?.closest?.('.f-sec-wrap')?.dataset?.secKey;
+  if (fromSel) return fromSel;
+  const visibleSecs = state.secOrder.filter(k => state.secEnabled[k]);
+  if (state.lastAddedSecKey && visibleSecs.includes(state.lastAddedSecKey)) {
+    return state.lastAddedSecKey;
+  }
+  const blankSec = [...visibleSecs].reverse().find(k => state.customSections?.[k]?.type === 'blank');
+  if (blankSec) return blankSec;
+  return (visibleSecs.includes('hero') ? 'hero' : visibleSecs[0]) || 'hero';
+}
+
+function addFreeTextBlock(targetSecKey, customText) {
+  pushUndoSnapshot();
+  const secKey = resolveDefaultFreeWidgetSecKey(targetSecKey);
+  const idxInSec = state.freeWidgets.filter(w => w.secKey === secKey).length;
+  const uid = 'fw-txt-' + Date.now() + '-' + Math.floor(Math.random() * 999);
+  const label = customText || '더블클릭하여 타이틀 문구를 자유롭게 수정하세요';
+  state.freeWidgets.push({
+    uid,
+    secKey,
+    catKey: 'text',
+    assetId: 'TXT-FREE',
+    customHTML: `<div class="f-h2" style="padding:10px 16px;border-radius:10px;background:color-mix(in srgb, var(--surface) 82%, transparent);backdrop-filter:blur(8px);border:1px solid var(--border);color:var(--fg);font-size:24px;line-height:1.25;min-width:220px;box-shadow:0 12px 28px rgba(0,0,0,0.12);">${label}</div>`,
+    xPct: 8 + (idxInSec % 3) * 14,
+    yPx: 48 + Math.floor(idxInSec / 3) * 140,
+    scale: 1,
+    zIndex: 32
+  });
+  renderLiveWebsite();
+  FORMA_PRO.ProjectState?.scheduleAutosave?.();
+  const mounted = typeof document !== 'undefined' ? document.querySelector(`.f-free-ui[data-uid="${uid}"]`) : null;
+  if (mounted) {
+    mounted.scrollIntoView?.({ behavior: 'auto', block: 'nearest', inline: 'start' });
+    const cf = document.getElementById('canvas-frame');
+    if (cf) cf.scrollLeft = 0;
+    selectCanvasUIElement(mounted);
+  }
+  showStudioToast('✨ 자유 텍스트 상자가 추가되었습니다! 원하는 곳으로 옮기거나 더블클릭해 수정하세요.');
+  return uid;
+}
+
+function addFreeBoxWidget(targetSecKey) {
+  pushUndoSnapshot();
+  const secKey = resolveDefaultFreeWidgetSecKey(targetSecKey);
+  const idxInSec = state.freeWidgets.filter(w => w.secKey === secKey).length;
+  const uid = 'fw-box-' + Date.now() + '-' + Math.floor(Math.random() * 999);
+  state.freeWidgets.push({
+    uid,
+    secKey,
+    catKey: 'surface',
+    assetId: state.equipped.surface,
+    customHTML: `<div class="f-card" style="width:100%;height:100%;min-height:120px;border-radius:var(--radius,10px);background:color-mix(in srgb, var(--surface) 88%, transparent);backdrop-filter:blur(12px);border:1.5px solid var(--border);box-shadow:0 16px 36px rgba(0,0,0,0.14);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:18px;text-align:center;"><span class="f-mono" style="font-size:11px;color:var(--accent);font-weight:700;">FREE CONTAINER BOX</span><strong style="font-size:14px;margin-top:4px;color:var(--fg);">더블클릭하여 내용 편집</strong></div>`,
+    xPct: 8 + (idxInSec % 3) * 14,
+    yPx: 50 + Math.floor(idxInSec / 3) * 165,
+    width: 240,
+    height: 150,
+    scale: 1,
+    zIndex: 29
+  });
+  renderLiveWebsite();
+  FORMA_PRO.ProjectState?.scheduleAutosave?.();
+  const mounted = typeof document !== 'undefined' ? document.querySelector(`.f-free-ui[data-uid="${uid}"]`) : null;
+  if (mounted) {
+    mounted.scrollIntoView?.({ behavior: 'auto', block: 'nearest', inline: 'start' });
+    const cf = document.getElementById('canvas-frame');
+    if (cf) cf.scrollLeft = 0;
+    selectCanvasUIElement(mounted);
+  }
+  showStudioToast('▢ 자유 컨테이너 박스가 추가되었습니다! 8방향 핸들로 크기를 조절하세요.');
+  return uid;
+}
+
+/* Local PC Photo Upload & Studio HD Photo Picker */
+let pendingImageUploadMode = 'selected'; // 'selected' | 'canvas'
+
+function triggerPCImageUploadForCanvas() {
+  pendingImageUploadMode = selectedCanvasEl ? 'selected' : 'canvas';
+  const inp = document.getElementById('st-img-upload-input');
+  if (inp) {
+    inp.value = '';
+    inp.click();
+  }
+}
+
+function spawnFreeImageWidget(imgSrc, targetSecKey, xPct = 24, yPx = 56) {
+  pushUndoSnapshot();
+  const secKey = resolveDefaultFreeWidgetSecKey(targetSecKey);
+  const imgCls = getAsset('imgstyle', state.equipped.imgstyle).cls;
+  const uid = 'fw-img-' + Date.now() + '-' + Math.floor(Math.random() * 999);
+  const resolvedSrc = (typeof FORMA_PRO !== 'undefined' && FORMA_PRO.ProjectState?.resolveAssetRef)
+    ? FORMA_PRO.ProjectState.resolveAssetRef(imgSrc)
+    : imgSrc;
+  state.freeWidgets.push({
+    uid,
+    secKey,
+    catKey: 'imgstyle',
+    assetId: state.equipped.imgstyle,
+    assetRef: (typeof imgSrc === 'string' && imgSrc.startsWith('asset://')) ? imgSrc : undefined,
+    customHTML: `<div class="${imgCls}" style="width:260px;height:180px;"><div class="f-media" style="width:100%;height:100%;"><img src="${resolvedSrc}" data-asset-ref="${(typeof imgSrc === 'string' && imgSrc.startsWith('asset://')) ? imgSrc : ''}" alt="Custom Photo" style="width:100%;height:100%;object-fit:cover;display:block;"/></div></div>`,
+    xPct,
+    yPx,
+    scale: 1,
+    width: 260,
+    height: 180,
+    zIndex: 30
+  });
+  renderLiveWebsite();
+  FORMA_PRO.ProjectState?.scheduleAutosave?.();
+  setTimeout(() => {
+    const mounted = document.querySelector(`.f-free-ui[data-uid="${uid}"]`);
+    if (mounted) selectCanvasUIElement(mounted);
+  }, 25);
+  showStudioToast('🖼 사진이 캔버스에 추가되었습니다! 모서리 핸들을 잡고 크기를 자유롭게 조절하세요.');
+  return uid;
+}
+
+function applySelectedUIImage(imgSrc) {
+  if (!imgSrc) return;
+  const pop = document.getElementById('st-photo-popover');
+  if (pop) pop.classList.remove('is-open');
+
+  if (!selectedCanvasEl) {
+    spawnFreeImageWidget(imgSrc);
+    return;
+  }
+
+  pushUndoSnapshot();
+  const imgEl = selectedCanvasEl.tagName === 'IMG'
+    ? selectedCanvasEl
+    : (selectedCanvasEl.querySelector ? selectedCanvasEl.querySelector('img') : null);
+
+  if (imgEl) {
+    const resolvedSrc = (typeof FORMA_PRO !== 'undefined' && FORMA_PRO.ProjectState?.resolveAssetRef)
+      ? FORMA_PRO.ProjectState.resolveAssetRef(imgSrc)
+      : imgSrc;
+    imgEl.src = resolvedSrc;
+    if (typeof imgSrc === 'string' && imgSrc.startsWith('asset://')) {
+      imgEl.setAttribute('data-asset-ref', imgSrc);
+    }
+    if (state.selectedFreeUid) {
+      const fw = state.freeWidgets.find(x => x.uid === state.selectedFreeUid);
+      if (fw) {
+        if (typeof imgSrc === 'string' && imgSrc.startsWith('asset://')) {
+          fw.assetRef = imgSrc;
+          fw.customHTML = selectedCanvasEl.innerHTML.replace(/src="data:image\/[^"]+"/g, `src="${imgSrc}"`);
+        } else {
+          fw.customHTML = selectedCanvasEl.innerHTML;
+        }
+      }
+    } else {
+      const pathKey = getElementPathInRoot(imgEl) || state.selectedUIPath;
+      if (pathKey) state.customImages[pathKey] = imgSrc;
+    }
+    showStudioToast('🖼 사진이 즉시 교체되었습니다!');
+    syncSelectedUIOverlay();
+    FORMA_PRO.ProjectState?.scheduleAutosave?.();
+  } else {
+    // Selected element has no <img> inside -> spawn a new free image right in the same section!
+    const secKey = selectedCanvasEl.closest?.('.f-sec-wrap')?.dataset?.secKey;
+    spawnFreeImageWidget(imgSrc, secKey);
+  }
+}
+
+async function handleLocalImageFileSelect(ev) {
+  const file = ev?.target?.files?.[0] || ev?.detail?.file || ev?.file;
+  const directDataUrl = ev?.target?.dataset?.uploadedDataUrl || ev?.detail?.dataUrl || '';
+  if (ev && ev.target && typeof ev.target.value === 'string') {
+    try { ev.target.value = ''; } catch (_) {}
+  }
+  if (!file && !directDataUrl) return;
+  let assetRefOrUrl = '';
+  if (directDataUrl) {
+    assetRefOrUrl = (typeof FORMA_PRO !== 'undefined' && FORMA_PRO.ProjectState?.registerCustomAsset)
+      ? FORMA_PRO.ProjectState.registerCustomAsset(directDataUrl)
+      : directDataUrl;
+  } else if (typeof FORMA_PRO !== 'undefined' && FORMA_PRO.ProjectState?.compressAndStoreImageAsset) {
+    assetRefOrUrl = await FORMA_PRO.ProjectState.compressAndStoreImageAsset(file);
+  } else if (typeof FileReader !== 'undefined') {
+    assetRefOrUrl = await new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = (e) => resolve(e.target?.result || '');
+      reader.onerror = () => resolve('');
+      reader.readAsDataURL(file);
+    });
+  }
+  if (!assetRefOrUrl) return;
+  if (pendingImageUploadMode === 'selected' && selectedCanvasEl) {
+    applySelectedUIImage(assetRefOrUrl);
+  } else {
+    spawnFreeImageWidget(assetRefOrUrl);
+  }
+}
+
+function openPhotoPickerForSelectedUI(mode = 'photo') {
+  const pop = document.getElementById('st-photo-popover');
+  const bar = document.getElementById('st-ui-toolbar');
+  if (!pop) return;
+  if (pop.classList.contains('is-open') && pop.dataset.mode === mode) {
+    pop.classList.remove('is-open');
+    return;
+  }
+  pop.dataset.mode = mode;
+  const br = bar?.getBoundingClientRect?.() || { left: 200, bottom: 120 };
+  pop.style.left = `${Math.max(12, br.left)}px`;
+  pop.style.top = `${(br.bottom || 120) + 8}px`;
+
+  if (mode === 'link') {
+    const curHref = selectedCanvasEl?.dataset?.customHref || '';
+    pop.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <strong style="font-size:12px;color:#F8FAFC;">🔗 클릭 이동 링크 설정</strong>
+        <button type="button" onclick="document.getElementById('st-photo-popover').classList.remove('is-open')" class="st-pill-btn" style="padding:2px 6px;">✕</button>
+      </div>
+      <div style="display:flex;gap:5px;">
+        <input id="st-link-input" type="text" value="${curHref.replace(/"/g, '&quot;')}" placeholder="#/contact 또는 #sec-form" style="flex:1;background:#161B28;border:1px solid rgba(255,255,255,0.16);border-radius:7px;padding:6px 9px;color:#F8FAFC;font-size:12px;outline:none;" />
+        <button type="button" onclick="setSelectedUILink(document.getElementById('st-link-input').value);document.getElementById('st-photo-popover').classList.remove('is-open');" class="st-pill-btn is-primary">적용</button>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:4px;">
+        ${[['#sec-hero','히어로'],['#sec-feature','핵심역량'],['#sec-pricing','요금표'],['#sec-form','예약/문의'],['#/contact','Contact 페이지']].map(([u, l]) => `
+          <button type="button" onclick="setSelectedUILink('${u}');document.getElementById('st-photo-popover').classList.remove('is-open');" class="st-pill-btn" style="padding:3px 7px;font-size:11px;">${l}</button>
+        `).join('')}
+      </div>
+    `;
+    pop.classList.add('is-open');
+    return;
+  }
+
+  const imgEntries = Object.entries(IMG || {});
+  pop.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <strong style="font-size:12px;color:#F8FAFC;">🖼 사진 바로 교체 / 내 사진 업로드</strong>
+      <button type="button" onclick="document.getElementById('st-photo-popover').classList.remove('is-open')" class="st-pill-btn" style="padding:2px 6px;">✕</button>
+    </div>
+    <button type="button" onclick="triggerPCImageUploadForCanvas()" class="st-pill-btn is-primary" style="width:100%;justify-content:center;padding:7px;">📁 내 컴퓨터에서 사진 파일 올리기...</button>
+    <div style="font-size:11px;color:#94A3B8;font-weight:600;">또는 스튜디오 HD 화보 클릭 즉시 적용:</div>
+    <div class="st-photo-grid">
+      ${imgEntries.map(([k, src]) => `
+        <button type="button" class="st-photo-thumb" onclick="applySelectedUIImage(IMG['${k}'])" title="${k}">
+          <img src="${src}" alt="${k}" />
+        </button>
+      `).join('')}
+    </div>
+  `;
+  pop.classList.add('is-open');
+}
+
+let copiedWidgetClipboard = null;
+
+function hideCanvasContextMenu() {
+  if (typeof document === 'undefined') return;
+  const menu = document.getElementById('st-context-menu');
+  if (menu) menu.style.display = 'none';
+}
+
+function copySelectedUI() {
+  if (!selectedCanvasEl) return false;
+  const secWrap = selectedCanvasEl.closest?.('.f-sec-wrap');
+  const secKey = secWrap?.dataset?.secKey || 'hero';
+  const sr = secWrap ? secWrap.getBoundingClientRect() : { left: 424, top: 100, width: 856, height: 400 };
+  const er = selectedCanvasEl.getBoundingClientRect();
+  const isFree = selectedCanvasEl.classList?.contains('f-free-ui');
+  if (isFree && state.selectedFreeUid) {
+    const fw = state.freeWidgets.find(x => x.uid === state.selectedFreeUid);
+    if (fw) {
+      copiedWidgetClipboard = deepCloneJSON(fw);
+      return true;
+    }
+  }
+  const cloneEl = selectedCanvasEl.cloneNode(true);
+  cloneEl.removeAttribute('id');
+  cloneEl.style.position = '';
+  cloneEl.style.left = '';
+  cloneEl.style.top = '';
+  cloneEl.style.transform = '';
+  copiedWidgetClipboard = {
+    secKey,
+    catKey: inferCategoryForCanvasElement(selectedCanvasEl),
+    assetId: '',
+    customHTML: isFree ? cloneEl.innerHTML : cloneEl.outerHTML,
+    xPct: Math.max(2, Math.min(86, ((er.left - sr.left) / Math.max(1, sr.width)) * 100)),
+    yPx: Math.max(8, Math.round(er.top - sr.top)),
+    scale: 1
+  };
+  return true;
+}
+
+function pasteCopiedUI() {
+  if (!copiedWidgetClipboard && selectedCanvasEl) {
+    copySelectedUI();
+  }
+  if (!copiedWidgetClipboard) return null;
+  pushUndoSnapshot();
+  const uid = 'fw-' + Date.now() + '-' + Math.floor(Math.random() * 999);
+  const nextWidget = {
+    ...deepCloneJSON(copiedWidgetClipboard),
+    uid,
+    xPct: Math.max(2, Math.min(88, (copiedWidgetClipboard.xPct || 18) + 2.5)),
+    yPx: Math.max(8, Math.round((copiedWidgetClipboard.yPx || 48) + 20))
+  };
+  state.freeWidgets.push(nextWidget);
+  renderLiveWebsite();
+  FORMA_PRO.ProjectState?.scheduleAutosave?.();
+  const mounted = typeof document !== 'undefined' ? document.querySelector(`.f-free-ui[data-uid="${uid}"]`) : null;
+  if (mounted) selectCanvasUIElement(mounted);
+  return uid;
+}
+
+function nudgeSelectedUI(dx, dy) {
+  const topEls = (typeof FORMA_PRO !== 'undefined' && FORMA_PRO.SelectionEngine?.getTopLevelSelectedElements)
+    ? FORMA_PRO.SelectionEngine.getTopLevelSelectedElements()
+    : (selectedCanvasEl ? [selectedCanvasEl] : []);
+  if (topEls.length === 0) return;
+
+  if (typeof FORMA_PRO !== 'undefined' && FORMA_PRO.SelectionEngine?.syncFreeWidgetsFromDOM) {
+    FORMA_PRO.SelectionEngine.syncFreeWidgetsFromDOM();
+  }
+  pushUndoSnapshot();
+
+  if (typeof FORMA_PRO !== 'undefined' && FORMA_PRO.SelectionEngine?.moveElementByLogicalDelta) {
+    topEls.forEach(el => FORMA_PRO.SelectionEngine.moveElementByLogicalDelta(el, dx, dy));
+    FORMA_PRO.SelectionEngine.syncFreeWidgetsFromDOM();
+  } else if (state.selectedFreeUid) {
+    const fw = state.freeWidgets.find(x => x.uid === state.selectedFreeUid);
+    if (fw) {
+      const secWrap = selectedCanvasEl.closest?.('.f-sec-wrap');
+      const sw = Math.max(1, secWrap?.getBoundingClientRect()?.width || 856);
+      fw.xPct = Number((fw.xPct + (dx / sw) * 100).toFixed(4));
+      fw.yPx = Math.round((fw.yPx || 0) + dy);
+      selectedCanvasEl.style.left = `${fw.xPct}%`;
+      selectedCanvasEl.style.top = `${fw.yPx}px`;
+    }
+  } else if (state.selectedUIPath) {
+    const cur = state.uiOffsets[state.selectedUIPath] || { x: 0, y: 0, scale: 1 };
+    const nx = (cur.x || 0) + dx;
+    const ny = (cur.y || 0) + dy;
+    state.uiOffsets[state.selectedUIPath] = { ...cur, x: nx, y: ny };
+    selectedCanvasEl.dataset.uiMoved = '1';
+    selectedCanvasEl.style.transform = `translate3d(${nx}px, ${ny}px, 0) scale(${cur.scale || 1})`;
+  }
+  syncSelectedUIOverlay();
+  FORMA_PRO.ProjectState?.scheduleAutosave?.();
 }
 
 function duplicateSelectedUI() {
@@ -1009,6 +2008,10 @@ function duplicateSelectedUI() {
   const er = selectedCanvasEl.getBoundingClientRect();
   const xPct = Math.max(2, Math.min(86, ((er.left - sr.left + 22) / Math.max(1, sr.width)) * 100));
   const yPx = Math.max(8, Math.round(er.top - sr.top + 22));
+  const isFree = selectedCanvasEl.classList?.contains('f-free-ui');
+  const origFw = isFree && state.selectedFreeUid
+    ? state.freeWidgets.find(x => x.uid === state.selectedFreeUid)
+    : null;
   const cloneEl = selectedCanvasEl.cloneNode(true);
   cloneEl.removeAttribute('id');
   cloneEl.style.position = '';
@@ -1017,20 +2020,20 @@ function duplicateSelectedUI() {
   cloneEl.style.transform = '';
   const uid = 'fw-' + Date.now() + '-' + Math.floor(Math.random() * 999);
   state.freeWidgets.push({
+    ...(origFw ? deepCloneJSON(origFw) : {}),
     uid,
     secKey: secWrap.dataset.secKey,
-    catKey: inferCategoryForCanvasElement(selectedCanvasEl),
-    assetId: '',
-    customHTML: cloneEl.outerHTML,
+    catKey: origFw?.catKey || inferCategoryForCanvasElement(selectedCanvasEl),
+    assetId: origFw?.assetId || '',
+    customHTML: isFree ? (origFw?.customHTML || cloneEl.innerHTML) : cloneEl.outerHTML,
     xPct,
     yPx,
-    scale: 1
+    scale: origFw?.scale || 1
   });
   renderLiveWebsite();
-  setTimeout(() => {
-    const mounted = document.querySelector(`.f-free-ui[data-uid="${uid}"]`);
-    if (mounted) selectCanvasUIElement(mounted);
-  }, 20);
+  FORMA_PRO.ProjectState?.scheduleAutosave?.();
+  const mounted = typeof document !== 'undefined' ? document.querySelector(`.f-free-ui[data-uid="${uid}"]`) : null;
+  if (mounted) selectCanvasUIElement(mounted);
 }
 
 function resetSelectedUIPosition() {
@@ -1038,37 +2041,53 @@ function resetSelectedUIPosition() {
   pushUndoSnapshot();
   if (state.selectedFreeUid) {
     const fw = state.freeWidgets.find(x => x.uid === state.selectedFreeUid);
-    if (fw) { fw.scale = 1; }
+    if (fw) { fw.scale = 1; delete fw.width; delete fw.height; }
     renderLiveWebsite();
+    FORMA_PRO.ProjectState?.scheduleAutosave?.();
     return;
   }
   if (state.selectedUIPath && state.uiOffsets[state.selectedUIPath]) {
     delete state.uiOffsets[state.selectedUIPath];
     delete selectedCanvasEl.dataset.uiMoved;
     selectedCanvasEl.style.transform = '';
+    selectedCanvasEl.style.width = '';
+    selectedCanvasEl.style.height = '';
+    selectedCanvasEl.style.background = '';
+    selectedCanvasEl.style.color = '';
     selectedCanvasEl.style.zIndex = '';
   }
   syncSelectedUIOverlay();
+  FORMA_PRO.ProjectState?.scheduleAutosave?.();
 }
 
 function deleteSelectedUI() {
-  if (!selectedCanvasEl) return;
+  const rawEls = (typeof FORMA_PRO !== 'undefined' && FORMA_PRO.SelectionEngine?.getTopLevelSelectedElements)
+    ? FORMA_PRO.SelectionEngine.getTopLevelSelectedElements()
+    : (selectedCanvasEl ? [selectedCanvasEl] : []);
+  const topEls = rawEls.filter(el => el && el.getAttribute?.('data-locked') !== 'true' && !el.closest?.('[data-locked="true"]'));
+  if (topEls.length === 0) return;
+
   pushUndoSnapshot();
-  if (state.selectedFreeUid) {
-    state.freeWidgets = state.freeWidgets.filter(x => x.uid !== state.selectedFreeUid);
-    clearSelectedCanvasUI();
-    renderLiveWebsite();
-    return;
-  }
-  if (state.selectedUIPath) {
-    state.uiOffsets[state.selectedUIPath] = { ...(state.uiOffsets[state.selectedUIPath] || {}), hidden: true };
-    selectedCanvasEl.style.display = 'none';
-    clearSelectedCanvasUI();
-  }
+  let removedFree = false;
+  topEls.forEach(el => {
+    if (el.classList?.contains('f-free-ui') && el.dataset?.uid) {
+      state.freeWidgets = state.freeWidgets.filter(x => x.uid !== el.dataset.uid);
+      removedFree = true;
+    } else {
+      const pk = getElementPathInRoot(el);
+      if (pk) {
+        state.uiOffsets[pk] = { ...(state.uiOffsets[pk] || {}), hidden: true };
+        el.style.display = 'none';
+      }
+    }
+  });
+  clearSelectedCanvasUI();
+  if (removedFree) renderLiveWebsite();
+  FORMA_PRO.ProjectState?.scheduleAutosave?.();
 }
 
 /* ==========================================================================
-   60FPS LIVE UI CLONE DRAG & DROP + DIRECT ON-CANVAS UI DRAG ENGINE
+   60FPS LIVE UI CLONE DRAG & DROP + 8-HANDLE RESIZE + SMART SNAP GUIDES
    ========================================================================== */
 function getMatchingCanvasSelector(catKey) {
   if (catKey === 'button') return '#hp-root .f-btn';
@@ -1098,6 +2117,7 @@ function clearAllDropHighlights() {
   document.getElementById('canvas-frame')?.classList.remove('is-drop-hot');
   const line = document.getElementById('st-sec-drop-line');
   if (line) line.style.display = 'none';
+  hideMagneticSnapGuides();
   document.querySelectorAll?.('.is-drop-target-el').forEach(el => el.classList.remove('is-drop-target-el'));
   document.querySelectorAll?.('.is-sec-replace-target').forEach(el => el.classList.remove('is-sec-replace-target'));
   document.querySelectorAll?.('.is-being-dragged').forEach(el => el.classList.remove('is-being-dragged'));
@@ -1113,9 +2133,10 @@ function computeSectionDropTarget(clientY, draggedCatKey, isReorderOnly = false)
     const el = secs[i];
     const r = el.getBoundingClientRect();
     const sk = el.dataset.secKey;
+    const baseSk = state.customSections[sk]?.baseCatKey || sk;
     if (clientY >= r.top && clientY <= r.bottom) {
       const rel = (clientY - r.top) / Math.max(1, r.height);
-      if (!isReorderOnly && sk === draggedCatKey && rel > 0.2 && rel < 0.8) {
+      if (!isReorderOnly && baseSk === draggedCatKey && state.customSections[sk]?.type !== 'blank' && rel > 0.2 && rel < 0.8) {
         return { mode: 'replace', el, refSecKey: sk };
       }
       const pos = rel < 0.5 ? 'before' : 'after';
@@ -1146,25 +2167,29 @@ function placeKeyRelative(orderArr, movingKey, refKey, pos) {
 function mountLiveVisualGhost(catKey, item) {
   const ghost = document.getElementById('st-drag-ghost');
   if (!ghost) return;
+  const baseCat = state.customSections[catKey]?.baseCatKey || catKey;
   const pal = getAsset('palette', state.equipped.palette);
   const fnt = getAsset('font', state.equipped.font);
   const srf = getAsset('surface', state.equipped.surface);
   const imgst = getAsset('imgstyle', state.equipped.imgstyle);
-  const isSec = CATEGORIES.find(c => c.key === catKey)?.group === 'section';
+  const isSec = Boolean(state.customSections[catKey] || CATEGORIES.find(c => c.key === baseCat)?.group === 'section');
   ghost.className = `st-drag-ghost ${isSec ? 'is-sec-ghost' : ''} f-site ${pal.cls} ${fnt.cls} ${srf.cls} ${imgst.cls}`;
-  ghost.innerHTML = renderDrawerVisualStage(catKey, item);
+  ghost.innerHTML = renderDrawerVisualStage(baseCat, item || getAsset(baseCat, state.equipped[baseCat]));
 }
 
 let activePointerDrag = null;
 let activeCanvasUIDrag = null;
+let activeResizeDrag = null;
+let activeSectionHeightDrag = null;
 
 function startSectionReorderDrag(ev, secKey) {
   if (ev.button && ev.button !== 0) return;
   ev.preventDefault();
   ev.stopPropagation();
   clearSelectedCanvasUI();
-  const meta = CATEGORIES.find(c => c.key === secKey);
-  const eq = getAsset(secKey, state.equipped[secKey]);
+  const baseCat = state.customSections[secKey]?.baseCatKey || secKey;
+  const meta = CATEGORIES.find(c => c.key === baseCat) || CATEGORIES[13];
+  const eq = getAsset(baseCat, state.customSections[secKey]?.assetId || state.equipped[baseCat]);
   mountLiveVisualGhost(secKey, eq);
   const secEl = document.getElementById('sec-' + secKey);
   if (secEl) secEl.style.opacity = '0.4';
@@ -1183,12 +2208,167 @@ function startSectionReorderDrag(ev, secKey) {
   };
 }
 
+function startSectionHeightResize(ev, secKey) {
+  if (ev.button && ev.button !== 0) return;
+  ev.preventDefault();
+  ev.stopPropagation();
+  clearSelectedCanvasUI();
+  const secWrap = document.getElementById('sec-' + secKey);
+  const innerSec = secWrap?.querySelector?.('.f-sec, .f-blank-sec') || secWrap;
+  if (!innerSec) return;
+  const r = innerSec.getBoundingClientRect();
+  pushUndoSnapshot();
+  activeSectionHeightDrag = {
+    secKey,
+    innerSec,
+    startY: ev.clientY,
+    origH: state.secHeights[secKey] || r.height || 360
+  };
+  document.body.classList.add('is-dragging');
+}
+
+function updateMagneticSnapGuides(el) {
+  const gx = document.getElementById('st-snap-guide-x');
+  const gy = document.getElementById('st-snap-guide-y');
+  if (!gx || !gy || !el) return;
+  const secWrap = el.closest?.('.f-sec-wrap');
+  if (!secWrap) {
+    hideMagneticSnapGuides();
+    return;
+  }
+  const sr = secWrap.getBoundingClientRect();
+  const er = el.getBoundingClientRect();
+  const elCx = er.left + er.width / 2;
+  const elCy = er.top + er.height / 2;
+  const secCx = sr.left + sr.width / 2;
+  const secCy = sr.top + sr.height / 2;
+
+  if (Math.abs(elCx - secCx) < 6) {
+    gx.style.display = 'block';
+    gx.style.left = `${Math.round(secCx)}px`;
+  } else {
+    gx.style.display = 'none';
+  }
+
+  if (Math.abs(elCy - secCy) < 6) {
+    gy.style.display = 'block';
+    gy.style.top = `${Math.round(secCy)}px`;
+  } else {
+    gy.style.display = 'none';
+  }
+}
+
 function initDragAndDropSystem() {
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
 
   const frame = document.getElementById('canvas-frame');
   if (frame && typeof frame.addEventListener === 'function') {
     frame.addEventListener('scroll', syncSelectedUIOverlay);
+
+    // Native File Drag-and-Drop from User's PC onto Canvas!
+    frame.addEventListener('dragover', (e) => {
+      if (e.dataTransfer?.types && Array.from(e.dataTransfer.types).includes('Files')) {
+        e.preventDefault();
+        frame.classList.add('is-drop-hot');
+      }
+    });
+    frame.addEventListener('dragleave', () => {
+      frame.classList.remove('is-drop-hot');
+    });
+    frame.addEventListener('drop', async (e) => {
+      frame.classList.remove('is-drop-hot');
+      const file = e.dataTransfer?.files?.[0];
+      if (!file || !file.type?.startsWith('image/')) return;
+      e.preventDefault();
+      if (typeof FileReader === 'undefined') return;
+      const hitEl = typeof document.elementFromPoint === 'function' ? document.elementFromPoint(e.clientX, e.clientY) : e.target;
+      const hitMedia = hitEl?.closest?.('img, .f-media, .f-card, .f-free-ui');
+      const hitSecWrap = hitEl?.closest?.('.f-sec-wrap');
+      let assetRefOrUrl = '';
+      if (typeof FORMA_PRO !== 'undefined' && FORMA_PRO.ProjectState?.compressAndStoreImageAsset) {
+        assetRefOrUrl = await FORMA_PRO.ProjectState.compressAndStoreImageAsset(file);
+      } else {
+        assetRefOrUrl = await new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onload = (ev) => resolve(ev.target?.result || '');
+          reader.onerror = () => resolve('');
+          reader.readAsDataURL(file);
+        });
+      }
+      if (!assetRefOrUrl) return;
+      if (hitMedia) {
+        selectCanvasUIElement(hitMedia);
+        applySelectedUIImage(assetRefOrUrl);
+      } else if (hitSecWrap) {
+        const sr = hitSecWrap.getBoundingClientRect();
+        const xPct = Math.max(4, Math.min(80, ((e.clientX - sr.left - 80) / Math.max(1, sr.width)) * 100));
+        const yPx = Math.max(12, Math.round(e.clientY - sr.top - 50));
+        spawnFreeImageWidget(assetRefOrUrl, hitSecWrap.dataset.secKey, xPct, yPx);
+      } else {
+        spawnFreeImageWidget(assetRefOrUrl);
+      }
+    });
+  }
+
+  // 0. 8-Handle Interactive Resize on #st-ui-sel-box (Zoom-aware delta / zoom math)
+  const selBox = document.getElementById('st-ui-sel-box');
+  if (selBox && typeof selBox.addEventListener === 'function') {
+    selBox.addEventListener('pointerdown', (e) => {
+      const hEl = e.target?.closest?.('.st-ui-sel-handle');
+      if (!hEl || !selectedCanvasEl) return;
+      if (selectedCanvasEl.getAttribute?.('data-locked') === 'true' || selectedCanvasEl.closest?.('[data-locked="true"]')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (typeof FORMA_PRO !== 'undefined' && FORMA_PRO.SelectionEngine?.syncFreeWidgetsFromDOM) {
+        FORMA_PRO.SelectionEngine.syncFreeWidgetsFromDOM();
+      }
+      const handle = hEl.dataset?.handle || 'se';
+      const z = (typeof FORMA_PRO !== 'undefined' && FORMA_PRO.ResponsiveEngine?.getCanvasZoom)
+        ? FORMA_PRO.ResponsiveEngine.getCanvasZoom()
+        : (state.zoom || 1);
+      const r = selectedCanvasEl.getBoundingClientRect();
+      const isFree = selectedCanvasEl.classList?.contains('f-free-ui');
+      const secWrap = selectedCanvasEl.closest?.('.f-blank-sec, .f-sec-wrap') || document.getElementById('hp-root');
+      const secRect = secWrap ? secWrap.getBoundingClientRect() : { left: 424, top: 100, width: 856, height: 400 };
+      const fw = isFree ? state.freeWidgets.find(x => x.uid === selectedCanvasEl.dataset.uid) : null;
+      const pathKey = !isFree ? (state.selectedUIPath || getElementPathInRoot(selectedCanvasEl)) : null;
+      const prevCfg = pathKey ? (state.uiOffsets[pathKey] || { x: 0, y: 0, scale: 1 }) : {};
+
+      const origW = Math.max(28, selectedCanvasEl.offsetWidth || Math.round((r.width || 140) / z));
+      const origH = Math.max(20, selectedCanvasEl.offsetHeight || Math.round((r.height || 44) / z));
+      const origLeftPx = isFree
+        ? ((selectedCanvasEl.style.left && selectedCanvasEl.style.left.endsWith('px'))
+            ? parseFloat(selectedCanvasEl.style.left)
+            : (r.left - secRect.left) / z)
+        : 0;
+      const origTopPx = isFree
+        ? ((selectedCanvasEl.style.top && selectedCanvasEl.style.top.endsWith('px'))
+            ? parseFloat(selectedCanvasEl.style.top)
+            : (r.top - secRect.top) / z)
+        : 0;
+
+      activeResizeDrag = {
+        el: selectedCanvasEl,
+        handle,
+        zoom: z,
+        isFree,
+        fw,
+        pathKey,
+        secRect,
+        startX: e.clientX,
+        startY: e.clientY,
+        origW,
+        origH,
+        origX: prevCfg.x || 0,
+        origY: prevCfg.y || 0,
+        origLeftPx,
+        origTopPx,
+        origXPct: fw ? fw.xPct : 10,
+        origYPx: fw ? fw.yPx : 20,
+        scale: prevCfg.scale || 1,
+        moved: false
+      };
+    });
   }
 
   // 1. Left Visual UI Tray -> Drag Actual UI Clone onto Live Webpage!
@@ -1227,100 +2407,335 @@ function initDragAndDropSystem() {
     });
   }
 
-  // 2. Direct On-Canvas UI Manipulation: Grab & Move ANY UI Element right on the Webpage!
+  // 2. Direct On-Canvas UI Manipulation: Grab & Move ANY UI Element right on the Webpage (+ Double-Click to Edit Text)!
   const mount = document.getElementById('website-mount');
+  if (frame && typeof frame.addEventListener === 'function') {
+    frame.addEventListener('pointerdown', (e) => {
+      if (e.button && e.button !== 0) return;
+      if (e.target === frame || e.target.id === 'canvas-zoom-sizer' || e.target.id === 'canvas-zoom-stage') {
+        hideCanvasContextMenu();
+        if (typeof FORMA_PRO !== 'undefined' && FORMA_PRO.SelectionEngine?.startMarqueeSelection) {
+          FORMA_PRO.SelectionEngine.startMarqueeSelection(e);
+        } else {
+          clearSelectedCanvasUI();
+        }
+      }
+    });
+  }
+
   if (mount) {
     mount.addEventListener('dragstart', (e) => e.preventDefault());
+
+    // Double-Click on ANY Text/Heading/Button/Widget -> Immediate Inline Text Edit!
+    mount.addEventListener('dblclick', (e) => {
+      if (state.presentation || (typeof FORMA_PRO !== 'undefined' && FORMA_PRO.ClientMode?.isClientMode?.())) return;
+      if (e.target.closest?.('.f-sec-pill, .f-sec-resize-bar')) return;
+      const editable = e.target.closest?.('.f-free-ui, h1, h2, h3, h4, p, .f-lead, .f-btn, .f-bdg, blockquote, li, a')
+        || e.target.closest?.('span');
+      if (!editable) return;
+      e.preventDefault();
+      e.stopPropagation();
+      selectCanvasUIElement(editable);
+      startInlineTextEditOnElement(editable);
+    });
+
+    // Right-Click on Canvas UI Element -> Open Context Menu (#st-context-menu)
+    mount.addEventListener('contextmenu', (e) => {
+      if (state.presentation || (typeof FORMA_PRO !== 'undefined' && FORMA_PRO.ClientMode?.isClientMode?.())) return;
+      const target = (typeof FORMA_PRO !== 'undefined' && FORMA_PRO.SelectionEngine?.resolveSelectableTarget)
+        ? FORMA_PRO.SelectionEngine.resolveSelectableTarget(e.target)
+        : e.target.closest?.('.f-free-ui, .f-btn, .f-bdg, .f-media, .f-input, h1, h2, h3, p, .f-lead, .f-card');
+      if (!target) {
+        hideCanvasContextMenu();
+        return;
+      }
+      e.preventDefault();
+      e.stopPropagation();
+      if (typeof FORMA_PRO !== 'undefined' && FORMA_PRO.SelectionEngine && !FORMA_PRO.SelectionEngine.isSelectedElement(target)) {
+        selectCanvasUIElement(target);
+      } else if (!selectedCanvasEl) {
+        selectCanvasUIElement(target);
+      }
+      const menu = document.getElementById('st-context-menu');
+      if (menu) {
+        menu.style.display = 'flex';
+        const mx = Math.max(8, Math.min((window.innerWidth || 1280) - 170, e.clientX));
+        const my = Math.max(8, Math.min((window.innerHeight || 800) - 160, e.clientY));
+        menu.style.left = `${mx}px`;
+        menu.style.top = `${my}px`;
+      }
+    });
+
     mount.addEventListener('pointerdown', (e) => {
+      hideCanvasContextMenu();
+      if (typeof FORMA_PRO !== 'undefined' && FORMA_PRO.ClientMode?.isClientMode?.()) return;
       if (!state.canvasMoveMode || state.inlineEdit || state.presentation) return;
       if (e.button && e.button !== 0) return;
-      if (e.target.closest?.('.f-sec-pill')) return;
+      if (e.target.closest?.('.f-sec-pill, .f-sec-resize-bar')) return;
+      if (e.target.closest?.('[data-live-editing="1"]')) return;
 
-      const movable = e.target.closest?.('.f-free-ui, .f-btn, .f-bdg, .f-media, h1, h2, h3, .f-lead, .f-card');
+      if (typeof FORMA_PRO !== 'undefined' && FORMA_PRO.SelectionEngine?.syncFreeWidgetsFromDOM) {
+        FORMA_PRO.SelectionEngine.syncFreeWidgetsFromDOM();
+      }
+
+      const selEngine = typeof FORMA_PRO !== 'undefined' ? FORMA_PRO.SelectionEngine : null;
+      const movable = selEngine
+        ? selEngine.resolveSelectableTarget(e.target)
+        : e.target.closest?.('.f-free-ui, .f-btn, .f-bdg, .f-media, .f-input, h1, h2, h3, p, .f-lead, .f-card');
+
       if (!movable) {
-        clearSelectedCanvasUI();
+        e.preventDefault();
+        if (selEngine) {
+          selEngine.startMarqueeSelection(e);
+        } else {
+          clearSelectedCanvasUI();
+        }
         return;
       }
 
       // Prevent native button clicks / text selection while moving UI directly
       e.preventDefault();
-      selectCanvasUIElement(movable);
 
-      const isFree = movable.classList?.contains('f-free-ui');
-      if (isFree) {
-        const fw = state.freeWidgets.find(x => x.uid === movable.dataset.uid);
-        const secWrap = movable.closest?.('.f-sec-wrap');
-        if (!fw || !secWrap) return;
-        activeCanvasUIDrag = {
-          el: movable,
-          isFree: true,
-          fw,
-          secRect: secWrap.getBoundingClientRect(),
-          startX: e.clientX,
-          startY: e.clientY,
-          origXPct: fw.xPct,
-          origYPx: fw.yPx,
-          moved: false
-        };
+      if (selEngine) {
+        if (e.shiftKey) {
+          selEngine.toggleSelection(movable);
+          if (!selEngine.isSelectedElement(movable)) {
+            return;
+          }
+        } else if (!selEngine.isSelectedElement(movable)) {
+          selEngine.selectSingle(movable);
+        } else {
+          setPrimarySelectedCanvasEl(movable);
+          syncSelectedUIOverlay();
+        }
       } else {
-        const pathKey = getElementPathInRoot(movable);
+        selectCanvasUIElement(movable);
+      }
+
+      const z = (typeof FORMA_PRO !== 'undefined' && FORMA_PRO.ResponsiveEngine?.getCanvasZoom)
+        ? FORMA_PRO.ResponsiveEngine.getCanvasZoom()
+        : (state.zoom || 1);
+      const vp = state.viewport || 'desktop';
+      const topEls = selEngine ? selEngine.getTopLevelSelectedElements() : [movable];
+      const dragItems = topEls.map((itemEl) => {
+        const isFree = itemEl.classList?.contains('f-free-ui');
+        const secWrap = itemEl.closest?.('.f-blank-sec, .f-sec-wrap') || document.getElementById('hp-root');
+        const sr = secWrap ? secWrap.getBoundingClientRect() : { left: 424, top: 100, width: 856, height: 400 };
+        const er = itemEl.getBoundingClientRect();
+        if (isFree) {
+          const fw = state.freeWidgets.find(x => x.uid === itemEl.dataset.uid);
+          const origX = (itemEl.style.left && itemEl.style.left.endsWith('px'))
+            ? parseFloat(itemEl.style.left)
+            : (er.left - sr.left) / z;
+          const origY = (itemEl.style.top && itemEl.style.top.endsWith('px'))
+            ? parseFloat(itemEl.style.top)
+            : (er.top - sr.top) / z;
+          return {
+            el: itemEl,
+            isFree: true,
+            fw,
+            secRect: sr,
+            origX,
+            origY,
+            origXPct: fw ? fw.xPct : 10,
+            origYPx: fw ? fw.yPx : 20
+          };
+        }
+        const pathKey = getElementPathInRoot(itemEl);
+        if (vp !== 'desktop' && typeof FORMA_PRO !== 'undefined' && FORMA_PRO.ResponsiveEngine) {
+          const patch = FORMA_PRO.ResponsiveEngine.getElementPatch(itemEl, vp);
+          return {
+            el: itemEl,
+            isFree: false,
+            pathKey,
+            origX: Number(patch.x) || 0,
+            origY: Number(patch.y) || 0,
+            scale: Number(patch.scale) || 1
+          };
+        }
         const prev = state.uiOffsets[pathKey] || { x: 0, y: 0, scale: 1 };
-        activeCanvasUIDrag = {
-          el: movable,
+        return {
+          el: itemEl,
           isFree: false,
           pathKey,
-          startX: e.clientX,
-          startY: e.clientY,
           origX: prev.x || 0,
           origY: prev.y || 0,
-          scale: prev.scale || 1,
-          moved: false
+          scale: prev.scale || 1
         };
-      }
+      });
+
+      const primaryRect = movable.getBoundingClientRect();
+      activeCanvasUIDrag = {
+        el: movable,
+        origRect: {
+          left: primaryRect.left,
+          top: primaryRect.top,
+          right: primaryRect.right,
+          bottom: primaryRect.bottom,
+          width: primaryRect.width,
+          height: primaryRect.height
+        },
+        items: dragItems,
+        zoom: z,
+        viewport: vp,
+        startX: e.clientX,
+        startY: e.clientY,
+        shiftKey: Boolean(e.shiftKey),
+        moved: false
+      };
     });
 
-    // Block accidental button onclick execution right after dragging a UI element on canvas
+    // Block accidental button onclick execution right after dragging a UI element on canvas, OR navigate multi-page links on clean click
     mount.addEventListener('click', (e) => {
-      if (state.canvasMoveMode && !state.inlineEdit && !state.presentation) {
-        if (e.target.closest?.('.f-sec-pill')) return;
-        if (mount._suppressClickUntil && Date.now() < mount._suppressClickUntil) {
-          e.preventDefault();
-          e.stopPropagation();
+      if (mount._suppressClickUntil && Date.now() < mount._suppressClickUntil) {
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+      const pageLink = e.target.closest?.('[data-page-link], [data-page-slug], a[href^="#/"]');
+      if (pageLink && !e.target.closest?.('[data-live-editing="1"]')) {
+        const slug = pageLink.getAttribute('data-page-link')
+          || pageLink.getAttribute('data-page-slug')
+          || (pageLink.getAttribute('href') || '').replace(/^#\/?/, '');
+        if (slug && typeof formaNavigatePage === 'function') {
+          formaNavigatePage(slug, e);
+          return;
         }
       }
     }, true);
   }
 
   window.addEventListener('pointermove', (e) => {
-    // A. Moving an On-Canvas UI Element Directly!
+    // 0-0. Rubber-Band Marquee Multi-Selection!
+    if (typeof FORMA_PRO !== 'undefined' && FORMA_PRO.SelectionEngine?.isMarqueeActive?.()) {
+      FORMA_PRO.SelectionEngine.updateMarqueeSelection(e);
+      return;
+    }
+
+    // 0-A. Dragging Section Bottom Height Resize Handle!
+    if (activeSectionHeightDrag) {
+      const sd = activeSectionHeightDrag;
+      const dy = e.clientY - sd.startY;
+      const nh = Math.max(120, Math.min(1800, Math.round(sd.origH + dy)));
+      state.secHeights[sd.secKey] = nh;
+      sd.innerSec.style.minHeight = `${nh}px`;
+      sd.innerSec.style.height = `${nh}px`;
+      return;
+    }
+
+    // 0-B. Dragging an 8-Direction Resize Handle on Selected UI Element! (Exact delta / zoom math)
+    if (activeResizeDrag) {
+      const rd = activeResizeDrag;
+      const rawDx = e.clientX - rd.startX;
+      const rawDy = e.clientY - rd.startY;
+      if (!rd.moved) {
+        if (Math.hypot(rawDx, rawDy) < 2) return;
+        rd.moved = true;
+        pushUndoSnapshot();
+        document.body.classList.add('is-dragging');
+      }
+      const z = rd.zoom || 1;
+      const dxLogical = rawDx / z;
+      const dyLogical = rawDy / z;
+
+      let nw = rd.origW;
+      let nh = rd.origH;
+      if (rd.handle.includes('e')) nw = Math.max(28, Math.round(rd.origW + dxLogical));
+      if (rd.handle.includes('w')) nw = Math.max(28, Math.round(rd.origW - dxLogical));
+      if (rd.handle.includes('s')) nh = Math.max(20, Math.round(rd.origH + dyLogical));
+      if (rd.handle.includes('n')) nh = Math.max(20, Math.round(rd.origH - dyLogical));
+
+      if (rd.isFree && rd.fw) {
+        rd.fw.width = nw;
+        rd.fw.height = nh;
+        if (rd.handle.includes('w')) {
+          const swLogical = Math.max(1, rd.secRect.width / z);
+          const nextLeft = Math.max(0, Math.round(rd.origLeftPx + dxLogical));
+          rd.fw.x = nextLeft;
+          rd.fw.xPct = Number(((nextLeft / swLogical) * 100).toFixed(4));
+          rd.el.style.left = `${nextLeft}px`;
+        }
+        if (rd.handle.includes('n')) {
+          const nextTop = Math.max(0, Math.round(rd.origTopPx + dyLogical));
+          rd.fw.y = nextTop;
+          rd.fw.yPx = nextTop;
+          rd.el.style.top = `${nextTop}px`;
+        }
+        applyDimensionToFreeWidgetEl(rd.el, nw, nh);
+      } else if (rd.pathKey) {
+        const cur = state.uiOffsets[rd.pathKey] || { x: 0, y: 0, scale: rd.scale };
+        const nx = rd.handle.includes('w') ? Math.round(rd.origX + dxLogical) : rd.origX;
+        const ny = rd.handle.includes('n') ? Math.round(rd.origY + dyLogical) : rd.origY;
+        state.uiOffsets[rd.pathKey] = { ...cur, x: nx, y: ny, width: nw, height: nh };
+        rd.el.style.width = `${nw}px`;
+        rd.el.style.height = `${nh}px`;
+        rd.el.dataset.uiMoved = '1';
+        rd.el.style.transform = `translate3d(${nx}px, ${ny}px, 0) scale(${rd.scale})`;
+      }
+      if (rd.el._rect) {
+        rd.el._rect = { ...rd.el._rect, width: nw, height: nh, right: (rd.el._rect.left || 0) + nw, bottom: (rd.el._rect.top || 0) + nh };
+      }
+      syncSelectedUIOverlay();
+      FORMA_PRO.ResponsiveEngine?.syncInspectorInputsFromSelected?.();
+      return;
+    }
+
+    // A. Moving On-Canvas UI Element(s) Directly (Single or Group Drag + True Magnetic Snapping + delta / zoom)!
     if (activeCanvasUIDrag) {
       const cd = activeCanvasUIDrag;
-      const dx = e.clientX - cd.startX;
-      const dy = e.clientY - cd.startY;
+      const rawDx = e.clientX - cd.startX;
+      const rawDy = e.clientY - cd.startY;
       if (!cd.moved) {
-        if (Math.hypot(dx, dy) < 3) return;
+        if (Math.hypot(rawDx, rawDy) < 3) return;
         cd.moved = true;
         pushUndoSnapshot();
         document.body.classList.add('is-dragging');
       }
-      if (cd.isFree) {
-        const sw = Math.max(1, cd.secRect.width);
-        cd.fw.xPct = Math.max(0, Math.min(92, cd.origXPct + (dx / sw) * 100));
-        cd.fw.yPx = Math.max(0, Math.round(cd.origYPx + dy));
-        cd.el.style.left = `${cd.fw.xPct}%`;
-        cd.el.style.top = `${cd.fw.yPx}px`;
-      } else {
-        let nx = Math.round(cd.origX + dx);
-        let ny = Math.round(cd.origY + dy);
-        if (Math.abs(nx) < 5) nx = 0;
-        if (Math.abs(ny) < 5) ny = 0;
-        state.uiOffsets[cd.pathKey] = { x: nx, y: ny, scale: cd.scale };
-        cd.el.dataset.uiMoved = '1';
-        if (!cd.el.style.position) cd.el.style.position = 'relative';
-        cd.el.style.zIndex = '25';
-        cd.el.style.transform = `translate3d(${nx}px, ${ny}px, 0) scale(${cd.scale})`;
-      }
+
+      const z = cd.zoom || 1;
+      const snap = (typeof FORMA_PRO !== 'undefined' && FORMA_PRO.SelectionEngine?.computeMagneticSnap)
+        ? FORMA_PRO.SelectionEngine.computeMagneticSnap(cd.el, cd.origRect, rawDx, rawDy, z, e.altKey)
+        : { dxScreen: 0, dyScreen: 0, snappedX: false, snappedY: false };
+
+      const finalDxLogical = (rawDx + (snap.dxScreen || 0)) / z;
+      const finalDyLogical = (rawDy + (snap.dyScreen || 0)) / z;
+
+      (cd.items || []).forEach((it) => {
+        if (it.isFree) {
+          const nx = Number((it.origX + finalDxLogical).toFixed(2));
+          const ny = Number((it.origY + finalDyLogical).toFixed(2));
+          it.el.style.left = `${nx}px`;
+          it.el.style.top = `${ny}px`;
+          if (it.fw) {
+            const swLogical = Math.max(1, it.secRect.width / z);
+            it.fw.x = nx;
+            it.fw.y = ny;
+            it.fw.yPx = Math.round(ny);
+            it.fw.xPct = Number(((nx / swLogical) * 100).toFixed(4));
+          }
+          if (cd.viewport !== 'desktop') {
+            FORMA_PRO.ResponsiveEngine?.setElementPatch?.(it.el, cd.viewport, { x: nx, y: ny });
+          }
+        } else if (cd.viewport !== 'desktop' && typeof FORMA_PRO !== 'undefined' && FORMA_PRO.ResponsiveEngine) {
+          const nx = Math.round(it.origX + finalDxLogical);
+          const ny = Math.round(it.origY + finalDyLogical);
+          FORMA_PRO.ResponsiveEngine.setElementPatch(it.el, cd.viewport, { x: nx, y: ny });
+        } else if (it.pathKey) {
+          let nx = Math.round(it.origX + finalDxLogical);
+          let ny = Math.round(it.origY + finalDyLogical);
+          if (!e.altKey && !snap.snappedX && Math.abs(nx) < 4) nx = 0;
+          if (!e.altKey && !snap.snappedY && Math.abs(ny) < 4) ny = 0;
+          const prev = state.uiOffsets[it.pathKey] || {};
+          state.uiOffsets[it.pathKey] = { ...prev, x: nx, y: ny, scale: it.scale };
+          it.el.dataset.uiMoved = '1';
+          if (!it.el.style.position) it.el.style.position = 'relative';
+          it.el.style.zIndex = String(prev.zIndex || 25);
+          it.el.style.transform = `translate3d(${nx}px, ${ny}px, 0) scale(${it.scale})`;
+        }
+      });
+
       syncSelectedUIOverlay();
+      FORMA_PRO.ResponsiveEngine?.syncInspectorInputsFromSelected?.();
       return;
     }
 
@@ -1419,12 +2834,47 @@ function initDragAndDropSystem() {
   });
 
   const finishPointerDrag = (ev) => {
+    if (typeof FORMA_PRO !== 'undefined' && FORMA_PRO.SelectionEngine?.isMarqueeActive?.()) {
+      const wasActive = FORMA_PRO.SelectionEngine.finishMarqueeSelection();
+      if (wasActive && mount) {
+        mount._suppressClickUntil = Date.now() + 180;
+      }
+      return;
+    }
+
+    if (activeSectionHeightDrag) {
+      activeSectionHeightDrag = null;
+      document.body.classList.remove('is-dragging');
+      FORMA_PRO.ProjectState?.scheduleAutosave?.();
+      showStudioToast('↕ 섹션 높이가 조절되었습니다.');
+      return;
+    }
+
+    if (activeResizeDrag) {
+      const rd = activeResizeDrag;
+      activeResizeDrag = null;
+      document.body.classList.remove('is-dragging');
+      hideMagneticSnapGuides();
+      if (rd.moved) {
+        if (mount) mount._suppressClickUntil = Date.now() + 180;
+        FORMA_PRO.ProjectState?.scheduleAutosave?.();
+      }
+      syncSelectedUIOverlay();
+      return;
+    }
+
     if (activeCanvasUIDrag) {
       const cd = activeCanvasUIDrag;
       activeCanvasUIDrag = null;
       document.body.classList.remove('is-dragging');
-      if (cd.moved && mount) {
-        mount._suppressClickUntil = Date.now() + 180;
+      hideMagneticSnapGuides();
+      if (cd.moved) {
+        if (mount) mount._suppressClickUntil = Date.now() + 180;
+        FORMA_PRO.ProjectState?.scheduleAutosave?.();
+      } else if (!cd.shiftKey && typeof FORMA_PRO !== 'undefined' && FORMA_PRO.SelectionEngine) {
+        if (FORMA_PRO.SelectionEngine.getSelection().length > 1) {
+          FORMA_PRO.SelectionEngine.selectSingle(cd.el);
+        }
       }
       syncSelectedUIOverlay();
       return;
@@ -1516,6 +2966,13 @@ function initDragAndDropSystem() {
 
     pushUndoSnapshot();
     if (d.meta.group === 'section') {
+      // If replacing a cloned section instance, update that clone's assetId directly
+      const targetSecKey = d.secTarget?.refSecKey;
+      if (d.secTarget?.mode === 'replace' && targetSecKey && state.customSections[targetSecKey]?.type === 'clone') {
+        state.customSections[targetSecKey].assetId = d.assetId;
+        renderLiveWebsite();
+        return;
+      }
       state.secEnabled[d.catKey] = true;
       if (d.secTarget?.mode === 'insert' && d.secTarget.refSecKey && d.secTarget.refSecKey !== d.catKey) {
         state.secOrder = placeKeyRelative(state.secOrder, d.catKey, d.secTarget.refSecKey, d.secTarget.pos);
@@ -1529,16 +2986,20 @@ function initDragAndDropSystem() {
 }
 
 /* ==========================================================================
-   RENDER FULL LIVE WEBSITE + PRELOADER / SCROLL LASER / INTRO CURTAIN
+   RENDER FULL LIVE WEBSITE + BLANK CANVAS SECTIONS + HEIGHT RESIZE HANDLES
    ========================================================================== */
 function makeSectionHoverPill(secKey) {
-  const eq = getAsset(secKey, state.equipped[secKey]);
+  const customSec = state.customSections[secKey];
+  const baseCat = customSec ? customSec.baseCatKey : secKey;
+  const eq = getAsset(baseCat, customSec?.assetId || state.equipped[baseCat]);
   return `<div class="f-sec-pill" contenteditable="false">
-    <button type="button" onpointerdown="startSectionReorderDrag(event, '${secKey}')" style="cursor:grab;background:rgba(56,189,248,0.28);color:#E0F2FE;" title="잡고 끌어서 섹션 이동">⠿</button>
+    <button type="button" onpointerdown="startSectionReorderDrag(event, '${secKey}')" style="cursor:grab;background:rgba(56,189,248,0.28);color:#E0F2FE;" title="잡고 끌어서 섹션 순서 이동">⠿</button>
     <button type="button" onclick="moveSectionOrder('${secKey}', -1)" title="위로">↑</button>
     <button type="button" onclick="moveSectionOrder('${secKey}', 1)" title="아래로">↓</button>
-    <button type="button" onclick="focusDrawerCategory('${secKey}')" title="이 섹션 다른 UI 보기">🎨</button>
-    <button type="button" onclick="openSingleAssetCode('${secKey}', '${eq.id}')" title="코드">&lt;/&gt;</button>
+    <button type="button" onclick="duplicateSectionInstance('${secKey}')" title="이 섹션을 아래에 하나 더 복제">⎘ 복제</button>
+    <button type="button" onclick="addBlankCanvasSection('${secKey}')" style="color:#6EE7B7;" title="이 섹션 아래에 빈 자유 캔버스 섹션 추가">+ ⬜ 빈섹션</button>
+    ${customSec?.type !== 'blank' ? `<button type="button" onclick="focusDrawerCategory('${baseCat}')" title="이 섹션 다른 UI 보기">🎨</button>` : ''}
+    ${customSec?.type !== 'blank' ? `<button type="button" onclick="openSingleAssetCode('${baseCat}', '${eq.id}')" title="코드">&lt;/&gt;</button>` : ''}
     <button type="button" onclick="hideSectionWithUndo('${secKey}')" style="background:rgba(239,68,68,0.25);color:#FCA5A5;" title="섹션 숨기기">✕</button>
   </div>`;
 }
@@ -1573,7 +3034,7 @@ function renderPreloaderChrome(pre) {
 function triggerIntroCurtain(modeOverride) {
   const root = document.getElementById('hp-root');
   if (!root) return;
-  const w = WORLDS[state.worldKey] || WORLDS.maison;
+  const w = getCurrentWorldObj();
   const pre = getAsset('preloader', state.equipped.preloader);
   const mode = modeOverride || (pre.mode.includes('Curtain') ? pre.mode : 'splitCurtain');
 
@@ -1618,7 +3079,8 @@ function triggerIntroCurtain(modeOverride) {
 }
 
 function renderLiveWebsite() {
-  const w      = WORLDS[state.worldKey] || WORLDS.maison;
+  globalThis._suppressDOMToFreeWidgetSync = true;
+  const w      = getCurrentWorldObj();
   const pal    = getAsset('palette',   state.equipped.palette);
   const shd    = getAsset('shader',    state.equipped.shader);
   const fnt    = getAsset('font',      state.equipped.font);
@@ -1633,38 +3095,88 @@ function renderLiveWebsite() {
   const wgt    = getAsset('widget',    state.equipped.widget);
 
   const secPy = state.tokens.density === 'compact' ? '52px' : (state.tokens.density === 'editorial' ? '104px' : '76px');
-  const tokenStyle = `--radius:${state.tokens.radius}px; --sec-py:${secPy}; --grain-op:${state.tokens.grain}; ${state.tokens.customAccent ? `--accent:${state.tokens.customAccent};` : ''}`;
+  const customPaletteCSS = (typeof FORMA_PRO !== 'undefined' && FORMA_PRO.BrandRestyler?.buildCustomPaletteStyleString)
+    ? FORMA_PRO.BrandRestyler.buildCustomPaletteStyleString(state.tokens)
+    : (state.tokens.customAccent ? `--accent:${state.tokens.customAccent};` : '');
+  const tokenStyle = `--radius:${state.tokens.radius}px; --sec-py:${secPy}; --grain-op:${state.tokens.grain}; ${customPaletteCSS}`;
+
+  const doc = (typeof FORMA_PRO !== 'undefined' && FORMA_PRO.ProjectState?.getDoc) ? FORMA_PRO.ProjectState.getDoc() : null;
+  const activePage = (typeof FORMA_PRO !== 'undefined' && FORMA_PRO.ProjectState?.getActivePage) ? FORMA_PRO.ProjectState.getActivePage() : null;
+  const activeSlug = activePage?.slug || 'home';
 
   const ctx = {
     bdgCls: bdg.cls,
     tfxId: tfx.id,
-    btn: (label) => btn.render(label)
+    btn: (label) => btn.render(label),
+    pages: doc?.pages || null,
+    activePageSlug: activeSlug
   };
 
   const renderedSections = state.secOrder
     .filter(secKey => state.secEnabled[secKey])
     .map(secKey => {
-      const mod = getAsset(secKey, state.equipped[secKey]);
-      const html = mod.render(w, ctx);
-      if (!html) return '';
+      const customSec = state.customSections[secKey];
+      const customH = state.secHeights[secKey];
+      let html = '';
+
       const secFreeWidgets = state.freeWidgets
         .filter(fw => fw.secKey === secKey)
         .map(fw => {
-          const inner = fw.customHTML || renderFreeComponentHTML(fw.catKey, getAsset(fw.catKey, fw.assetId));
-          return `<div class="f-free-ui" data-uid="${fw.uid}" data-free-cat="${fw.catKey}" style="left:${fw.xPct}%;top:${fw.yPx}px;transform:scale(${fw.scale || 1});transform-origin:top left;">${inner}</div>`;
+          const rawInner = fw.customHTML || renderFreeComponentHTML(fw.catKey, getAsset(fw.catKey, fw.assetId));
+          const inner = (typeof FORMA_PRO !== 'undefined' && FORMA_PRO.ProjectState?.resolveAssetRef)
+            ? FORMA_PRO.ProjectState.resolveAssetRef(rawInner)
+            : rawInner;
+          const leftVal = Number.isFinite(fw.x) ? `${fw.x}px` : `${fw.xPct}%`;
+          const topVal = `${Number.isFinite(fw.y) ? fw.y : fw.yPx}px`;
+          const sizeStyle = `${fw.width ? `width:${Math.round(fw.width)}px;` : ''}${fw.height ? `height:${Math.round(fw.height)}px;` : ''}${fw.zIndex ? `z-index:${fw.zIndex};` : ''}${fw.hidden ? 'display:none;' : ''}`;
+          const lockAttr = fw.locked ? ' data-locked="true"' : '';
+          const hidAttr = fw.hidden ? ' data-hidden="true"' : '';
+          const extraAttrs = fw.e2eAttrs
+            ? Object.entries(fw.e2eAttrs).map(([k, v]) => ` ${k}="${String(v).replace(/"/g, '&quot;')}"`).join('')
+            : '';
+          return `<div class="f-free-ui" data-uid="${fw.uid}" data-f-el="fw::${fw.uid}" data-free-cat="${fw.catKey}"${lockAttr}${hidAttr}${extraAttrs} ${fw.href ? `data-custom-href="${fw.href}"` : ''} style="left:${leftVal};top:${topVal};transform:scale(${fw.scale || 1});transform-origin:top left;${sizeStyle}">${inner}</div>`;
         }).join('');
-      return `<div id="sec-${secKey}" data-sec-key="${secKey}" class="f-sec-wrap">
+
+      if (customSec?.type === 'blank') {
+        const hasPlaced = state.freeWidgets.some(fw => fw.secKey === secKey);
+        html = `<section class="f-blank-sec" style="min-height:${customH || 440}px;position:relative;">
+          ${!hasPlaced ? `<div class="f-blank-guide">
+            <div class="f-mono" style="font-size:11px;color:var(--accent);font-weight:700;">FREEFORM ARTBOARD SECTION</div>
+            <strong style="display:block;font-size:15px;margin:6px 0 4px;">자유 배치 캔버스 섹션</strong>
+            <span style="font-size:12px;color:var(--sub);">왼쪽 패널에서 버튼·카드·사진·인풋 UI를 끌어다 원하는 위치에 놓거나, 상단 [+ T 텍스트] · [+ 🖼 내 사진]을 눌러 자유롭게 꾸미세요.</span>
+          </div>` : ''}
+          ${secFreeWidgets}
+        </section>`;
+        return `<div id="sec-${secKey}" data-sec-key="${secKey}" class="f-sec-wrap">
+          ${makeSectionHoverPill(secKey)}
+          ${html}
+          <div class="f-sec-resize-bar" onpointerdown="startSectionHeightResize(event, '${secKey}')" title="위아래로 드래그하여 섹션 높이 조절"><span>↕ 높이 조절</span></div>
+        </div>`;
+      } else {
+        const baseCat = customSec ? customSec.baseCatKey : secKey;
+        const mod = getAsset(baseCat, customSec?.assetId || state.equipped[baseCat]);
+        html = mod ? mod.render(w, ctx) : '';
+      }
+      if (!html) return '';
+
+      return `<div id="sec-${secKey}" data-sec-key="${secKey}" class="f-sec-wrap" ${customH && customSec?.type !== 'blank' ? `style="min-height:${customH}px;"` : ''}>
         ${makeSectionHoverPill(secKey)}
         ${html}
         ${secFreeWidgets}
+        <div class="f-sec-resize-bar" onpointerdown="startSectionHeightResize(event, '${secKey}')" title="위아래로 드래그하여 섹션 높이 조절"><span>↕ 높이 조절</span></div>
       </div>`;
     }).join('\n');
 
   const mount = document.getElementById('website-mount');
   if (!mount) return;
 
+  const activeVp = state.viewport || 'desktop';
+  const respCSS = (typeof FORMA_PRO !== 'undefined' && FORMA_PRO.ResponsiveEngine?.compileResponsiveCSS)
+    ? FORMA_PRO.ResponsiveEngine.compileResponsiveCSS()
+    : '';
   mount.innerHTML = `
-    <div id="hp-root" class="f-site ${pal.cls} ${shd.cls || ''} ${fnt.cls} ${tfx.cls} ${srf.cls} ${imgst.cls} ${inp.cls || ''} ${mot.cls} ${state.guidesOn ? 'guides-on' : ''} ${state.canvasMoveMode && !state.inlineEdit ? 'is-move-mode' : ''} ${state.inlineEdit ? 'is-editing' : ''}" style="${tokenStyle}">
+    <div id="hp-root" data-viewport="${activeVp}" data-active-page="${activeSlug}" class="f-site ${pal.cls} ${shd.cls || ''} ${fnt.cls} ${tfx.cls} ${srf.cls} ${imgst.cls} ${inp.cls || ''} ${mot.cls} ${state.guidesOn ? 'guides-on' : ''} ${state.canvasMoveMode && !state.inlineEdit ? 'is-move-mode' : ''} ${state.inlineEdit ? 'is-editing' : ''}" style="${tokenStyle}">
+      <style id="hp-responsive-overrides">${respCSS}</style>
       ${renderPreloaderChrome(pre)}
       <canvas id="hp-shader-canvas" class="f-shader-layer"></canvas>
       <div class="f-grain-overlay"></div>
@@ -1677,8 +3189,37 @@ function renderLiveWebsite() {
       </div>
     </div>
   `;
+  globalThis._suppressDOMToFreeWidgetSync = false;
+  const rootEl = document.getElementById('hp-root');
+  if (rootEl) {
+    if (rootEl.dataset) {
+      rootEl.dataset.viewport = activeVp;
+      rootEl.dataset.activePage = activeSlug;
+    }
+    rootEl.setAttribute?.('data-viewport', activeVp);
+    rootEl.setAttribute?.('data-active-page', activeSlug);
+    rootEl.setAttribute?.('style', tokenStyle);
+  }
 
   applyStoredUIOffsets();
+  if (typeof FORMA_PRO !== 'undefined' && FORMA_PRO.ResponsiveEngine) {
+    FORMA_PRO.ResponsiveEngine.stampSelectableElements?.(rootEl);
+    FORMA_PRO.ResponsiveEngine.applyResponsiveState?.(rootEl);
+    FORMA_PRO.ResponsiveEngine.ensureInspectorMounted?.();
+    FORMA_PRO.ResponsiveEngine.bindCanvasWheelZoom?.();
+  }
+  if (typeof FORMA_PRO !== 'undefined' && FORMA_PRO.InspectorUI) {
+    FORMA_PRO.InspectorUI.applyStoredLayerStatesToDOM?.(rootEl);
+    FORMA_PRO.InspectorUI.renderInspector?.();
+    FORMA_PRO.InspectorUI.renderLayerTree?.();
+    FORMA_PRO.InspectorUI.syncSelectionUI?.();
+  }
+  if (typeof FORMA_PRO !== 'undefined' && FORMA_PRO.InteractionsEngine) {
+    FORMA_PRO.InteractionsEngine.applyInteractionsToDOM?.(rootEl);
+  }
+  if (state.inlineEdit) {
+    bindEditablePersistenceInTextMode(document.getElementById('hp-root'));
+  }
   initShaderEngine(shd.mode);
   bindLivePhysics();
   initScrollChoreography();
@@ -1688,7 +3229,7 @@ function renderLiveWebsite() {
    INTERACTIVE SECTION WIDGET HANDLERS
    ========================================================================== */
 function swapHeroEdition(idx) {
-  const w = WORLDS[state.worldKey];
+  const w = getCurrentWorldObj();
   const wk = w.works[idx];
   if (!wk) return;
   const img = document.getElementById('hero-cfg-img');
@@ -1705,7 +3246,7 @@ function swapHeroEdition(idx) {
 }
 
 function swapFeatShowcase(idx) {
-  const w = WORLDS[state.worldKey];
+  const w = getCurrentWorldObj();
   const f = w.features[idx];
   if (!f) return;
   const img = document.getElementById('feat-swap-img');
@@ -1722,7 +3263,7 @@ function swapFeatShowcase(idx) {
 }
 
 function switchFeatTab(idx) {
-  const w = WORLDS[state.worldKey];
+  const w = getCurrentWorldObj();
   const f = w.features[idx];
   if (!f) return;
   const img = document.getElementById('ftab-img');
@@ -1741,7 +3282,7 @@ function switchFeatTab(idx) {
 }
 
 function switchProcessStep(idx) {
-  const w = WORLDS[state.worldKey];
+  const w = getCurrentWorldObj();
   const st = w.steps[idx];
   const f = w.features[idx % w.features.length];
   if (!st) return;
@@ -1761,7 +3302,7 @@ function switchProcessStep(idx) {
 }
 
 function scrubProcessTimeline(idx) {
-  const w = WORLDS[state.worldKey];
+  const w = getCurrentWorldObj();
   const st = w.steps[idx];
   if (!st) return;
   const pct = document.getElementById('pro-scrub-pct');
@@ -1773,7 +3314,7 @@ function scrubProcessTimeline(idx) {
 }
 
 function swapGalleryMaster(idx) {
-  const w = WORLDS[state.worldKey];
+  const w = getCurrentWorldObj();
   const wk = w.works[idx];
   if (!wk) return;
   const im = document.getElementById('gal-stage-main');
@@ -1785,7 +3326,7 @@ function swapGalleryMaster(idx) {
 }
 
 function switchTeamMember(idx) {
-  const w = WORLDS[state.worldKey];
+  const w = getCurrentWorldObj();
   const m = w.team[idx];
   if (!m) return;
   const im = document.getElementById('tem-sw-img');
@@ -1806,7 +3347,7 @@ function switchTeamMember(idx) {
 }
 
 function switchPlanInspector(idx) {
-  const w = WORLDS[state.worldKey];
+  const w = getCurrentWorldObj();
   const p = w.plans[idx];
   if (!p) return;
   const tr = document.getElementById('prc-in-tier');
@@ -1855,7 +3396,7 @@ function toggleBillingCycle(cycle) {
 }
 
 function stepReviewSlider(dir) {
-  const w = WORLDS[state.worldKey];
+  const w = getCurrentWorldObj();
   state.reviewIdx = (state.reviewIdx + dir + w.reviews.length) % w.reviews.length;
   const rv = w.reviews[state.reviewIdx];
   const q = document.getElementById('rev-slider-quote');
@@ -2049,8 +3590,13 @@ function initShaderEngine(mode) {
   const accentHex = (cs?.getPropertyValue('--accent') || '#8C5A32').trim();
 
   const frame = document.getElementById('canvas-frame');
-  canvas.width = frame ? frame.clientWidth : 1000;
-  canvas.height = frame ? Math.max(frame.clientHeight, 900) : 900;
+  const isClient = typeof FORMA_PRO !== 'undefined' && FORMA_PRO.ClientMode?.isClientMode?.();
+  canvas.width = isClient
+    ? (typeof window !== 'undefined' && window.innerWidth ? window.innerWidth : 1280)
+    : (frame && frame.clientWidth ? frame.clientWidth : 1000);
+  canvas.height = isClient
+    ? (typeof window !== 'undefined' && window.innerHeight ? Math.max(window.innerHeight, 900) : 900)
+    : (frame ? Math.max(frame.clientHeight, 900) : 900);
   canvas.style.position = 'sticky';
   canvas.style.top = '0';
   canvas.style.height = canvas.height + 'px';
@@ -2196,21 +3742,31 @@ function bindLivePhysics() {
 let siteObserver = null;
 
 function animateCountUp(el) {
-  if (el._counted) return;
-  el._counted = true;
+  if (el._counted || el._counting) return;
+  el._counting = true;
   const target = parseFloat(el.dataset.target || '0');
   const isFloat = String(el.dataset.target).includes('.');
-  const dur = 1100;
+  const dur = 240;
   const start = performance.now();
   function step(now) {
     const p = Math.min(1, (now - start) / dur);
     const eased = 1 - Math.pow(1 - p, 3);
     const val = target * eased;
-    el.textContent = isFloat ? val.toFixed(target % 1 !== 0 && String(target).split('.')[1]?.length === 2 ? 2 : 1) : Math.round(val).toLocaleString();
-    if (p < 1) requestAnimationFrame(step);
-    else el.textContent = isFloat ? String(target) : target.toLocaleString();
+    if (p < 1) {
+      el.textContent = isFloat ? val.toFixed(target % 1 !== 0 && String(target).split('.')[1]?.length === 2 ? 2 : 1) : Math.round(val).toLocaleString();
+      requestAnimationFrame(step);
+    } else {
+      el.textContent = isFloat ? String(target) : target.toLocaleString();
+      el._counting = false;
+      el._counted = true;
+    }
   }
   if (typeof requestAnimationFrame === 'function') requestAnimationFrame(step);
+  else {
+    el.textContent = isFloat ? String(target) : target.toLocaleString();
+    el._counting = false;
+    el._counted = true;
+  }
 }
 
 function initScrollChoreography(forceReplay = false) {
@@ -2221,11 +3777,21 @@ function initScrollChoreography(forceReplay = false) {
 
   const reveals = root.querySelectorAll('.f-reveal');
   const counters = root.querySelectorAll('.f-countup');
+  const isClient = typeof FORMA_PRO !== 'undefined' && FORMA_PRO.ClientMode?.isClientMode?.();
 
-  if (state.equipped.motion !== 'MOT-08') {
-    reveals.forEach(el => el.classList.add('is-waiting'));
+  if (state.equipped.motion !== 'MOT-08' && (forceReplay || state.presentation || isClient)) {
+    reveals.forEach(el => {
+      if (el.getAttribute('data-scroll-reveal') === 'none') {
+        el.classList.remove('is-waiting');
+        el.style.opacity = '1';
+      } else {
+        el.classList.add('is-waiting');
+      }
+    });
+  } else {
+    reveals.forEach(el => el.classList.remove('is-waiting'));
   }
-  if (forceReplay) counters.forEach(c => { c._counted = false; });
+  if (forceReplay) counters.forEach(c => { c._counted = false; c._counting = false; });
 
   siteObserver = new IntersectionObserver((entries) => {
     entries.forEach(entry => {
@@ -2235,7 +3801,7 @@ function initScrollChoreography(forceReplay = false) {
         entry.target.querySelectorAll?.('.f-countup').forEach(animateCountUp);
       }
     });
-  }, { root: frame, threshold: 0.1 });
+  }, { root: isClient ? null : frame, threshold: 0.1 });
 
   reveals.forEach(el => siteObserver.observe(el));
   counters.forEach(el => siteObserver.observe(el));
@@ -2274,14 +3840,27 @@ function initCustomCursorSystem() {
   const cf = document.getElementById('canvas-frame');
   if (!ring || !cf || typeof requestAnimationFrame !== 'function') return;
 
-  cf.addEventListener('scroll', () => {
-    const maxScroll = Math.max(1, cf.scrollHeight - cf.clientHeight);
-    const pct = Math.min(100, Math.max(0, Math.round((cf.scrollTop / maxScroll) * 100)));
+  const updateScrollIndicators = (scrollTop, maxScroll) => {
+    const pct = Math.min(100, Math.max(0, Math.round((scrollTop / Math.max(1, maxScroll)) * 100)));
     const laser = document.getElementById('hp-scroll-laser');
     if (laser) laser.style.setProperty('--scroll-pct', pct + '%');
     const pill = document.getElementById('hp-scroll-pct-pill');
     if (pill) pill.textContent = `SCROLL ${pct < 10 ? '0' + pct : pct}%`;
+  };
+
+  cf.addEventListener('scroll', () => {
+    updateScrollIndicators(cf.scrollTop, cf.scrollHeight - cf.clientHeight);
   });
+
+  if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+    window.addEventListener('scroll', () => {
+      if (typeof FORMA_PRO !== 'undefined' && FORMA_PRO.ClientMode?.isClientMode?.()) {
+        const docEl = document.documentElement;
+        const maxS = Math.max(1, (docEl.scrollHeight || document.body.scrollHeight) - window.innerHeight);
+        updateScrollIndicators(window.scrollY || docEl.scrollTop || 0, maxS);
+      }
+    }, { passive: true });
+  }
 
   let tx = -100, ty = -100, cx = -100, cy = -100, lastSpark = 0;
 
@@ -2367,7 +3946,7 @@ function renderVaultStage(catKey, item) {
   const imgst = getAsset('imgstyle', state.equipped.imgstyle);
   const inp   = getAsset('inputui',  state.equipped.inputui);
   const bdg   = getAsset('badge',    state.equipped.badge);
-  const w     = WORLDS[state.worldKey] || WORLDS.maison;
+  const w     = getCurrentWorldObj();
   const ctx   = { bdgCls: bdg.cls, tfxId: tfx.id, btn: (l) => btn.render(l) };
 
   /* 01. PALETTE */
@@ -2773,7 +4352,7 @@ function extractMatchingCSSRules(selectors) {
 
 function buildStandaloneAssetPackage(catKey, assetId) {
   const item  = getAsset(catKey, assetId);
-  const w     = WORLDS[state.worldKey] || WORLDS.maison;
+  const w     = getCurrentWorldObj();
   const pal   = catKey === 'palette' ? item : getAsset('palette', state.equipped.palette);
   const fnt   = catKey === 'font'    ? item : getAsset('font', state.equipped.font);
   const bdg   = getAsset('badge', state.equipped.badge);
@@ -2935,8 +4514,8 @@ document.querySelectorAll('.f-btn').forEach(btn => {
   }
 
   const cleanBodyForCopy = bodyHTML
-    .replace(/data:image\/webp;base64,[^"]+/g, 'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=1200&q=80')
-    .replace(/__SAMPLE_IMG__/g, 'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=1200&q=80');
+    .replace(/data:image\/webp;base64,[^"'\s)]+/g, 'assets/editorial-sample.webp')
+    .replace(/__SAMPLE_IMG__/g, 'assets/editorial-sample.webp');
 
   const liveBodyForIframe = bodyHTML.replace(/__SAMPLE_IMG__/g, IMG[w.heroImg]);
 
@@ -2953,7 +4532,7 @@ ${cleanBodyForCopy.trim()}
 ${scriptJS ? `\n<script>\n${scriptJS.trim()}\n<\/script>` : ''}`;
 
   const fontsCSS = document.getElementById('forma-fonts-css')?.textContent || '';
-  const previewDoc = `<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"/><style>${fontsCSS}\nbody{margin:0;padding:20px;background:#0D0F15;font-family:'Plus Jakarta Sans','IBM Plex Sans KR',sans-serif;}\n*,*::before,*::after{box-sizing:border-box;}\n${extraCSS}</style></head><body>${liveBodyForIframe}${scriptJS ? `<script>${scriptJS}<\/script>` : ''}</body></html>`;
+  const previewDoc = `<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"/><style>${fontsCSS}\nbody{margin:0;padding:20px;background:#0D0F15;font-family:'Plus Jakarta Sans','IBM Plex Sans KR',"Pretendard Variable","Pretendard","Apple SD Gothic Neo","Malgun Gothic","Noto Sans CJK KR",sans-serif;}\n*,*::before,*::after{box-sizing:border-box;}\n${extraCSS}</style></head><body>${liveBodyForIframe}${scriptJS ? `<script>${scriptJS}<\/script>` : ''}</body></html>`;
 
   return { codeText, previewDoc, item };
 }
@@ -2987,23 +4566,65 @@ function openSingleAssetCode(catKey, assetId) {
 }
 
 function openFullWebsiteExport() {
-  const w = WORLDS[state.worldKey];
+  const w = getCurrentWorldObj();
   const coreCSS = document.getElementById('forma-core-css')?.textContent || '';
   const fontsCSS = document.getElementById('forma-fonts-css')?.textContent || '';
   const root = document.getElementById('hp-root');
   if (!root) return;
 
-  const clone = root.cloneNode(true);
-  clone.querySelectorAll('.f-sec-pill, #floating-work-preview, #hp-live-curtain').forEach(el => el.remove());
-  clone.querySelectorAll('.is-waiting').forEach(el => el.classList.remove('is-waiting'));
-  clone.classList.remove('guides-on', 'is-editing', 'is-move-mode');
+  const cleanCloneNodeToHTML = (node) => {
+    let rawHTML = '';
+    if (node && typeof node.cloneNode === 'function' && typeof node.querySelectorAll === 'function' && node.outerHTML) {
+      const clone = node.cloneNode(true);
+      clone.querySelectorAll('.f-sec-pill, .f-sec-resize-bar, .f-blank-guide, #floating-work-preview, #hp-live-curtain').forEach(el => el.remove());
+      clone.querySelectorAll('.is-waiting').forEach(el => el.classList.remove('is-waiting'));
+      clone.querySelectorAll('[data-live-editing]').forEach(el => {
+        el.removeAttribute('contenteditable');
+        el.removeAttribute('data-live-editing');
+      });
+      clone.classList.remove('guides-on', 'is-editing', 'is-move-mode');
+      rawHTML = clone.outerHTML.replace(/\b(guides-on|is-editing|is-move-mode)\b/g, '');
+    } else {
+      const fallbackSrc = (node && (node.outerHTML || node.innerHTML)) || document.getElementById('website-mount')?.innerHTML || '';
+      rawHTML = String(fallbackSrc).replace(/\b(guides-on|is-editing|is-move-mode)\b/g, '');
+    }
+    return (typeof FORMA_PRO !== 'undefined' && FORMA_PRO.ProjectState?.resolveAssetRef)
+      ? FORMA_PRO.ProjectState.resolveAssetRef(rawHTML)
+      : rawHTML;
+  };
 
-  const liveCloneHTML = clone.outerHTML.replace(/\b(guides-on|is-editing|is-move-mode)\b/g, '');
-  const cleanHTML = liveCloneHTML.replace(/data:image\/webp;base64,[^"]+/g, 'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=1400&q=80');
+  let liveCloneHTML = cleanCloneNodeToHTML(root);
+  const exportedPagesMap = {};
+  const doc = (typeof FORMA_PRO !== 'undefined' && FORMA_PRO.ProjectState?.getDoc)
+    ? FORMA_PRO.ProjectState.getDoc()
+    : null;
+  if (doc && Array.isArray(doc.pages) && doc.pages.length > 0 && typeof FORMA_PRO.ProjectState?.switchPage === 'function') {
+    const origPageId = doc.activePageId;
+    doc.pages.forEach(p => {
+      FORMA_PRO.ProjectState.switchPage(p.id, false);
+      const curRoot = document.getElementById('hp-root');
+      if (curRoot) {
+        exportedPagesMap[p.slug] = cleanCloneNodeToHTML(curRoot);
+      }
+    });
+    FORMA_PRO.ProjectState.switchPage(origPageId, false);
+    if (exportedPagesMap.home) {
+      liveCloneHTML = exportedPagesMap.home;
+    } else {
+      const restoredRoot = document.getElementById('hp-root');
+      if (restoredRoot) liveCloneHTML = cleanCloneNodeToHTML(restoredRoot);
+    }
+  }
+
+  const cleanHTML = liveCloneHTML;
+  const shd = getAsset('shader', state.equipped.shader);
   const summary = CATEGORIES.map(c => `${c.key}:${state.equipped[c.key]}`).join(' | ');
+  const serializedPagesJSON = JSON.stringify(exportedPagesMap).replace(/<\//g, '<\\/');
 
   const standaloneScript = `
     let ambientAudio = null;
+    let shaderRAF = null;
+    const EXPORTED_PAGES = ${serializedPagesJSON};
     function showStudioToast(m){
       let t = document.getElementById('sa-toast');
       if(!t){ t = document.createElement('div'); t.id='sa-toast'; t.style.cssText='position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:#F8FAFC;color:#090A0D;padding:8px 16px;border-radius:999px;font-size:12px;font-weight:700;z-index:999;box-shadow:0 12px 30px rgba(0,0,0,0.4);'; document.body.appendChild(t); }
@@ -3013,20 +4634,67 @@ function openFullWebsiteExport() {
     ${toggleBillingCycle.toString()}
     ${filterGalleryItems.toString()}
     ${selectFormPlan.toString()}
-    document.querySelectorAll('.f-btn').forEach(btn => {
-      btn.addEventListener('mousemove', e => {
-        const r = btn.getBoundingClientRect();
-        btn.style.setProperty('--mx', (e.clientX - r.left) + 'px');
-        btn.style.setProperty('--my', (e.clientY - r.top) + 'px');
-        if (btn.dataset.uiMoved === '1') return;
-        if (btn.classList.contains('f-magnetic')) {
-          btn.style.transform = 'translate(' + ((e.clientX - r.left - r.width/2)*0.25).toFixed(1) + 'px,' + ((e.clientY - r.top - r.height/2)*0.3).toFixed(1) + 'px)';
-        }
+    ${drawShaderFrame.toString()}
+    ${initShaderEngine.toString()}
+    function bindStandaloneInteractions() {
+      initShaderEngine(${JSON.stringify(shd.mode || 'aurora')});
+      document.querySelectorAll('[data-custom-href]').forEach(el => {
+        el.addEventListener('click', e => {
+          const href = el.getAttribute('data-custom-href');
+          if (!href) return;
+          e.preventDefault();
+          if (href.startsWith('#/')) {
+            formaNavigatePage(href.slice(2), e);
+          } else if (href.startsWith('#')) {
+            document.querySelector(href)?.scrollIntoView({ behavior: 'smooth' });
+          } else {
+            window.open(href, '_blank', 'noopener');
+          }
+        });
       });
-      btn.addEventListener('mouseleave', () => {
-        if (btn.dataset.uiMoved === '1') return;
-        btn.style.transform = '';
+      document.querySelectorAll('[data-page-link], a[href^="#/"]').forEach(el => {
+        el.addEventListener('click', e => {
+          const slug = el.getAttribute('data-page-link') || (el.getAttribute('href') || '').replace(/^#\\/?/, '');
+          if (slug) formaNavigatePage(slug, e);
+        });
       });
+      document.querySelectorAll('.f-btn').forEach(btn => {
+        btn.addEventListener('mousemove', e => {
+          const r = btn.getBoundingClientRect();
+          btn.style.setProperty('--mx', (e.clientX - r.left) + 'px');
+          btn.style.setProperty('--my', (e.clientY - r.top) + 'px');
+          if (btn.dataset.uiMoved === '1') return;
+          if (btn.classList.contains('f-magnetic')) {
+            btn.style.transform = 'translate(' + ((e.clientX - r.left - r.width/2)*0.25).toFixed(1) + 'px,' + ((e.clientY - r.top - r.height/2)*0.3).toFixed(1) + 'px)';
+          }
+        });
+        btn.addEventListener('mouseleave', () => {
+          if (btn.dataset.uiMoved === '1') return;
+          btn.style.transform = '';
+        });
+      });
+    }
+    function formaNavigatePage(slug, ev) {
+      if (ev && typeof ev.preventDefault === 'function') ev.preventDefault();
+      const clean = String(slug || '').replace(/^#\\/?/, '').trim() || 'home';
+      const html = EXPORTED_PAGES[clean];
+      if (!html) return false;
+      const curRoot = document.getElementById('hp-root');
+      if (curRoot) {
+        const tmp = document.createElement('div');
+        tmp.innerHTML = html;
+        if (tmp.firstElementChild) curRoot.replaceWith(tmp.firstElementChild);
+      }
+      try {
+        if (window.location.hash !== '#/' + clean) window.location.hash = '#/' + clean;
+      } catch (_) {}
+      window.scrollTo(0, 0);
+      bindStandaloneInteractions();
+      return false;
+    }
+    window.addEventListener('hashchange', () => {
+      const slug = (window.location.hash || '').replace(/^#\\/?/, '').trim();
+      if (slug && EXPORTED_PAGES[slug]) formaNavigatePage(slug);
     });
     document.addEventListener('mousemove', e => {
       document.querySelectorAll('.f-card').forEach(c => {
@@ -3034,7 +4702,11 @@ function openFullWebsiteExport() {
         c.style.setProperty('--cmx', (e.clientX - r.left) + 'px');
         c.style.setProperty('--cmy', (e.clientY - r.top) + 'px');
       });
-    });`;
+    });
+    bindStandaloneInteractions();
+    if (window.location.hash && window.location.hash.startsWith('#/')) {
+      formaNavigatePage(window.location.hash.slice(2));
+    }`;
 
   const standaloneDoc = `<!DOCTYPE html>
 <html lang="ko">
@@ -3043,10 +4715,9 @@ function openFullWebsiteExport() {
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>${w.brand} — ${w.eyebrow}</title>
   <meta name="description" content="${w.h1Sub}" />
-  <!-- FORMA STUDIO v8 Assembled 26-Slot Combination: ${summary} -->
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=Cormorant+Garamond:ital,wght@0,400..700;1,400..700&family=Gowun+Batang:wght@400;700&family=Hahmlet:wght@700&family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=JetBrains+Mono:wght@400..700&family=Noto+Serif+KR:wght@300;600&family=Playfair+Display:ital,wght@0,400..800;1,400..800&family=Plus+Jakarta+Sans:wght@400..800&family=Space+Grotesk:wght@400..700&family=Syne:wght@600..800&display=swap" />
+  <!-- FORMA STUDIO Pro Assembled 26-Slot Combination: ${summary} -->
   <style>
+${fontsCSS}
     html, body { margin: 0; padding: 0; overflow-x: hidden; overflow-y: auto !important; height: auto !important; }
 ${coreCSS}
   </style>
@@ -3082,7 +4753,7 @@ function downloadExportHTML() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `${state.worldKey}-forma-v8.html`;
+  a.download = `${state.worldKey}-forma-site.html`;
   a.click();
   URL.revokeObjectURL(url);
   showStudioToast('완성 홈페이지 HTML 파일 다운로드가 시작되었습니다.');
@@ -3090,16 +4761,33 @@ function downloadExportHTML() {
 
 function downloadStudioSelfHTML() {
   if (typeof Blob === 'undefined' || !document.documentElement) return;
+  const doc = (typeof FORMA_PRO !== 'undefined' && FORMA_PRO.ProjectState?.getDoc)
+    ? FORMA_PRO.ProjectState.getDoc()
+    : null;
+
   const clone = document.documentElement.cloneNode(true);
+  clone.classList.remove('is-client-mode');
+  if (doc && clone.querySelector) {
+    let bootEl = clone.querySelector('#forma-boot-project');
+    if (!bootEl) {
+      bootEl = document.createElement('script');
+      bootEl.id = 'forma-boot-project';
+      bootEl.type = 'application/json';
+      const bodyEl = clone.querySelector('body') || clone;
+      bodyEl.insertBefore(bootEl, bodyEl.firstChild);
+    }
+    bootEl.textContent = JSON.stringify(doc).replace(/<\//g, '<\\/');
+  }
+
   [
-    'website-mount', 'st-subbar', 'st-cat-rail', 'st-drawer-cat-head',
-    'st-drawer-cards', 'st-hidden-secs-bar', 'st-tune-popover',
+    'website-mount', 'st-subbar', 'st-drawer-cat-head',
+    'st-drawer-cards', 'st-hidden-secs-bar', 'st-tune-popover', 'st-photo-popover',
     'vault-toolbar', 'vault-cats-bar', 'vault-cards-grid', 'st-drag-ghost'
   ].forEach(id => {
     const el = clone.querySelector ? clone.querySelector('#' + id) : null;
     if (el) el.innerHTML = '';
   });
-  ['st-ui-sel-box', 'st-ui-toolbar', 'st-drag-ghost', 'st-sec-drop-line'].forEach(id => {
+  ['st-ui-sel-box', 'st-ui-toolbar', 'st-photo-popover', 'st-drag-ghost', 'st-sec-drop-line', 'st-snap-guide-x', 'st-snap-guide-y', 'st-marquee-box', 'st-context-menu'].forEach(id => {
     const el = clone.querySelector ? clone.querySelector('#' + id) : null;
     if (el) el.style.display = 'none';
   });
@@ -3112,22 +4800,26 @@ function downloadStudioSelfHTML() {
     appEl.classList.remove('is-presentation');
   }
   const fullHTML = '<!DOCTYPE html>\n' + clone.outerHTML;
+  if (typeof window !== 'undefined') {
+    window.__lastSelfStudioHTML = fullHTML;
+  }
   const blob = new Blob([fullHTML], { type: 'text/html;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = 'FORMA_STUDIO_v8.html';
+  a.download = 'FORMA_STUDIO_Pro.html';
   document.body.appendChild(a);
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
-  showStudioToast('FORMA_STUDIO_v8.html 다운로드 시작! 더블클릭하면 크롬 전체화면으로 바로 열립니다.');
+  showStudioToast('FORMA_STUDIO_Pro.html 다운로드 시작! 현재 모든 페이지·수정이 함께 내장되었습니다.');
 }
 
 /* ==========================================================================
    VIEWPORT SYNC (496px Inline Embed <-> Full-Height Side Pane) & BOOT
    ========================================================================== */
 function syncStudioViewportHeight() {
+  if (typeof FORMA_PRO !== 'undefined' && FORMA_PRO.ClientMode?.isClientMode?.()) return;
   const app = document.getElementById('studio-app');
   if (!app || typeof window === 'undefined') return;
   if (window.innerHeight > 540) {
@@ -3145,6 +4837,19 @@ function syncStudioViewportHeight() {
 }
 
 window.addEventListener('DOMContentLoaded', () => {
+  // 1. Hydrate ProjectDocument v2 synchronously from #forma-boot-project or localStorage
+  if (typeof FORMA_PRO !== 'undefined' && FORMA_PRO.ProjectState?.hydrateProjectStateSync) {
+    FORMA_PRO.ProjectState.hydrateProjectStateSync();
+  }
+
+  // 2. If ?mode=client is active, boot Zero-Chrome Client Preview Runtime immediately
+  if (typeof FORMA_PRO !== 'undefined' && FORMA_PRO.ClientMode?.isClientMode?.()) {
+    initDragAndDropSystem();
+    initCustomCursorSystem();
+    FORMA_PRO.ClientMode.bootClientModeRuntime();
+    return;
+  }
+
   syncStudioViewportHeight();
   // Keep the pure visual UI tray OPEN side-by-side next to the live canvas on Desktop & Inline embeds (>= 660px)!
   if (typeof window !== 'undefined' && window.innerWidth < 660) {
@@ -3154,34 +4859,83 @@ window.addEventListener('DOMContentLoaded', () => {
     if (btn) btn.textContent = '◨ UI패널';
   }
   window.addEventListener('resize', syncStudioViewportHeight);
+  window.addEventListener('beforeunload', () => {
+    FORMA_PRO.ProjectState?.flushAutosaveNow?.();
+  });
 
   updateUndoButtonUI();
+  if (typeof renderPageTabsUI === 'function') renderPageTabsUI();
   renderQuickSubbar();
   renderSidebarBody();
   renderLiveWebsite();
   initDragAndDropSystem();
   initCustomCursorSystem();
+  FORMA_PRO.ProjectState?.hydrateProjectStateFromIDBAsync?.();
 
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
+      hideCanvasContextMenu();
       clearSelectedCanvasUI();
       if (state.presentation) togglePresentationMode(false);
       if (state.tuneOpen) toggleTunePopover(false);
       document.getElementById('export-modal')?.classList.remove('is-open');
       document.getElementById('lightbox-modal')?.classList.remove('is-open');
+      document.getElementById('projects-modal')?.classList.remove('is-open');
+      document.getElementById('brand-restyler-modal')?.classList.remove('is-open');
+      document.getElementById('client-share-modal')?.classList.remove('is-open');
     }
-    if ((e.key === 'Delete' || e.key === 'Backspace') && !state.inlineEdit && selectedCanvasEl && !/INPUT|TEXTAREA|SELECT/.test(e.target?.tagName || '')) {
+    const isFormInput = Boolean(/INPUT|TEXTAREA|SELECT/.test(e.target?.tagName || ''));
+    const isActivelyTypingInline = Boolean(
+      e.target?.dataset?.liveEditing === '1' ||
+      (e.target?.isContentEditable && document.activeElement === e.target)
+    );
+    const isEditingTarget = Boolean(isFormInput || isActivelyTypingInline || state.inlineEdit);
+
+    if (!isEditingTarget && selectedCanvasEl) {
+      const step = e.shiftKey ? 10 : 1;
+      if (e.key === 'ArrowLeft') { e.preventDefault(); nudgeSelectedUI(-step, 0); return; }
+      if (e.key === 'ArrowRight') { e.preventDefault(); nudgeSelectedUI(step, 0); return; }
+      if (e.key === 'ArrowUp') { e.preventDefault(); nudgeSelectedUI(0, -step); return; }
+      if (e.key === 'ArrowDown') { e.preventDefault(); nudgeSelectedUI(0, step); return; }
+    }
+    if ((e.key === 'Delete' || e.key === 'Backspace') && !isEditingTarget && selectedCanvasEl) {
       e.preventDefault();
       deleteSelectedUI();
     }
-    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z' && !state.inlineEdit) {
-      e.preventDefault();
-      undoLastAction();
-    }
-    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
-      e.preventDefault();
-      setStudioMode(state.mode === 'vault' ? 'builder' : 'vault');
-      setTimeout(() => document.getElementById('vault-search-input')?.focus(), 60);
+    if (e.metaKey || e.ctrlKey) {
+      const k = e.key.toLowerCase();
+      if (!isFormInput && k === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        if (isActivelyTypingInline && typeof document.activeElement?.blur === 'function') {
+          document.activeElement.blur();
+        }
+        undoLastAction();
+        return;
+      }
+      if (!isFormInput && ((k === 'z' && e.shiftKey) || k === 'y')) {
+        e.preventDefault();
+        if (isActivelyTypingInline && typeof document.activeElement?.blur === 'function') {
+          document.activeElement.blur();
+        }
+        redoLastAction();
+        return;
+      }
+      if (!isEditingTarget) {
+        if (k === 'd' && selectedCanvasEl) {
+          e.preventDefault();
+          duplicateSelectedUI();
+        } else if (k === 'c' && selectedCanvasEl) {
+          e.preventDefault();
+          copySelectedUI();
+        } else if (k === 'v') {
+          e.preventDefault();
+          pasteCopiedUI();
+        } else if (k === 'k') {
+          e.preventDefault();
+          setStudioMode(state.mode === 'vault' ? 'builder' : 'vault');
+          setTimeout(() => document.getElementById('vault-search-input')?.focus(), 60);
+        }
+      }
     }
   });
 });

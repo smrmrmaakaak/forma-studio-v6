@@ -1378,7 +1378,9 @@ Object.assign(VAULT, {
     {
       id: 'FTR-01', name: '모뉴멘탈 자이언트 워드마크 푸터 (Awwwards 대표 트렌드)',
       desc: '상단 4열 사이트맵·뉴스레터 아래 화면 전체 폭을 압도하는 초대형 브랜드 워드마크로 대미를 장식',
-      render: (w) => `
+      render: (w, ctx) => {
+        const navItems = getSiteNavLinks(w, ctx);
+        return `
       <footer style="padding:64px var(--sec-px) 28px;background:var(--surface);">
         <div class="f-container" style="padding:0;">
           <div class="fg-12" style="padding-bottom:48px;border-bottom:1px solid var(--border);align-items:start;">
@@ -1390,7 +1392,7 @@ Object.assign(VAULT, {
               </div>
             </div>
             <div class="fc-7 fg-3" style="font-size:13px;">
-              <div><div class="f-mono" style="font-size:12px;color:var(--sub);margin-bottom:10px;">NAVIGATION</div>${w.nav.map(n=>`<div style="margin-bottom:6px;">${n}</div>`).join('')}</div>
+              <div><div class="f-mono" style="font-size:12px;color:var(--sub);margin-bottom:10px;">NAVIGATION</div>${navItems.map(it=>`<div style="margin-bottom:6px;">${renderPageNavLink(it, 'color:var(--sub);')}</div>`).join('')}</div>
               <div><div class="f-mono" style="font-size:12px;color:var(--sub);margin-bottom:10px;">FLAGSHIP</div><div style="margin-bottom:6px;">서울 종로구 자하문로</div><div style="margin-bottom:6px;">도쿄 미나미아오야마</div><div>파리 마레 아카이브</div></div>
               <div><div class="f-mono" style="font-size:12px;color:var(--sub);margin-bottom:10px;">SOCIAL</div><div style="margin-bottom:6px;">Instagram ↗</div><div style="margin-bottom:6px;">Are.na ↗</div><div>Behance ↗</div></div>
             </div>
@@ -1400,101 +1402,124 @@ Object.assign(VAULT, {
           </div>
           <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--sub);padding-top:12px;border-top:1px solid var(--border);">
             <span>© 2026 ${w.brand}. All Rights Reserved.</span>
-            <span style="cursor:pointer;" onclick="document.getElementById('canvas-frame')?.scrollTo({top:0,behavior:'smooth'})">BACK TO TOP ↑</span>
+            <span style="cursor:pointer;" onclick="if(window.FORMA_PRO?.ClientMode?.isClientMode?.()){window.scrollTo({top:0,behavior:'smooth'});}else{document.getElementById('canvas-frame')?.scrollTo({top:0,behavior:'smooth'});}">BACK TO TOP ↑</span>
           </div>
         </div>
-      </footer>`
+      </footer>`;
+      }
     },
     {
       id: 'FTR-02', name: '에디토리얼 4단 살롱 콜로폰(Colophon) 푸터',
       desc: '차분한 여백과 정갈한 4열 정보 구조로 마감하는 부티크·호텔 정통 푸터',
-      render: (w) => `<footer style="padding:56px var(--sec-px) 36px;background:var(--muted);">
+      render: (w, ctx) => {
+        const navItems = getSiteNavLinks(w, ctx);
+        return `<footer style="padding:56px var(--sec-px) 36px;background:var(--muted);">
         <div class="f-container fg-4" style="padding:0 0 36px;border-bottom:1px solid var(--border);font-size:13px;align-items:start;">
           <div><div style="font-family:var(--font-display);font-size:22px;font-weight:700;">${w.brand}</div><p style="font-size:12px;color:var(--sub);margin-top:10px;line-height:1.7;">${w.eyebrow}</p></div>
-          <div><strong style="display:block;margin-bottom:10px;">메뉴 안내</strong>${w.nav.map(n=>`<div style="color:var(--sub);margin-bottom:6px;">${n}</div>`).join('')}</div>
+          <div><strong style="display:block;margin-bottom:10px;">메뉴 안내</strong>${navItems.map(it=>`<div style="margin-bottom:6px;">${renderPageNavLink(it, 'color:var(--sub);')}</div>`).join('')}</div>
           <div><strong style="display:block;margin-bottom:10px;">컨시어지</strong><div style="color:var(--sub);margin-bottom:6px;">02-555-8200</div><div style="color:var(--sub);">09:00 – 21:00 연중무휴</div></div>
           <div><strong style="display:block;margin-bottom:10px;">법적 고지</strong><div style="color:var(--sub);margin-bottom:6px;">개인정보처리방침</div><div style="color:var(--sub);">이용약관</div></div>
         </div>
         <div class="f-container" style="padding:18px 0 0;display:flex;justify-content:space-between;font-size:12px;color:var(--sub);"><span>© 2026 ${w.brand}</span><span>SEOUL · REPUBLIC OF KOREA</span></div>
-      </footer>`
+      </footer>`;
+      }
     },
     {
       id: 'FTR-03', name: '다크 인버트 글로벌 오피스 이그제큐티브 푸터',
       desc: '묵직한 다크 솔리드 배경과 글로벌 오피스 주소를 배치한 기업·테크·로펌 푸터',
-      render: (w) => `<footer style="padding:56px var(--sec-px) 36px;background:var(--fg);color:var(--bg);">
+      render: (w, ctx) => {
+        const navItems = getSiteNavLinks(w, ctx);
+        return `<footer style="padding:56px var(--sec-px) 36px;background:var(--fg);color:var(--bg);">
         <div class="f-container fg-12" style="padding:0 0 36px;border-bottom:1px solid rgba(128,128,128,0.28);align-items:start;">
-          <div class="fc-6"><div style="font-family:var(--font-display);font-size:26px;font-weight:700;">${w.brand}</div><p style="font-size:13px;opacity:0.72;max-width:380px;margin-top:10px;">${w.h1Sub}</p></div>
+          <div class="fc-6"><div style="font-family:var(--font-display);font-size:26px;font-weight:700;">${w.brand}</div><p style="font-size:13px;opacity:0.72;max-width:380px;margin-top:10px;">${w.h1Sub}</p><div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:16px;font-size:12px;">${navItems.map(it=>renderPageNavLink(it, 'color:var(--bg);opacity:0.85;')).join('')}</div></div>
           <div class="fc-6 fg-2" style="font-size:13px;">
             <div><div class="f-mono" style="font-size:12px;color:var(--accent);margin-bottom:8px;">SEOUL HQ</div><div style="opacity:0.8;">서울특별시 강남구 테헤란로 프라이빗 타워 42F<br/>T. 02-555-8200</div></div>
             <div><div class="f-mono" style="font-size:12px;color:var(--accent);margin-bottom:8px;">GLOBAL DESK</div><div style="opacity:0.8;">New York · London · Singapore · Tokyo<br/>advisory@forma-studio.com</div></div>
           </div>
         </div>
         <div class="f-container" style="padding:18px 0 0;display:flex;justify-content:space-between;font-size:12px;opacity:0.65;"><span>© 2026 ${w.brand}. All Rights Reserved.</span><span>ISO 27001 · PRIVACY POLICY</span></div>
-      </footer>`
+      </footer>`;
+      }
     },
     {
       id: 'FTR-04', name: '브루탈 자이언트 START A PROJECT ↗ 콜투액션 푸터',
       desc: '푸터 자체를 초대형 의뢰 유도 타이포그래피 링크로 전환한 크리에이티브 스튜디오 시그니처',
-      render: (w) => `<footer style="padding:64px var(--sec-px) 32px;border-top:1.5px solid var(--fg);background:var(--surface);">
+      render: (w, ctx) => {
+        const navItems = getSiteNavLinks(w, ctx);
+        return `<footer style="padding:64px var(--sec-px) 32px;border-top:1.5px solid var(--fg);background:var(--surface);">
         <div class="f-container" style="padding:0;">
           <div class="f-mono" style="font-size:12px;color:var(--accent);margin-bottom:12px;">READY TO ELEVATE YOUR BRAND?</div>
           <div onclick="document.getElementById('sec-form')?.scrollIntoView({behavior:'smooth'})" style="font-family:var(--font-display);font-size:clamp(2.4rem,6.5vw,5.4rem);font-weight:800;line-height:1;cursor:pointer;display:flex;justify-content:space-between;align-items:center;padding-bottom:40px;border-bottom:1.5px solid var(--fg);">
             <span>START A PROJECT</span><span style="color:var(--accent);">↗</span>
           </div>
-          <div style="padding-top:20px;display:flex;justify-content:space-between;font-family:'JetBrains Mono',monospace;font-size:12px;">
+          <div style="padding-top:20px;display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:12px;font-family:'JetBrains Mono',monospace;font-size:12px;">
             <span>${w.brand} — ${w.edition}</span>
+            <div style="display:flex;gap:16px;flex-wrap:wrap;">${navItems.map(it=>renderPageNavLink(it, 'color:var(--sub);')).join('')}</div>
             <span>SEOUL / BERLIN / TOKYO</span>
           </div>
         </div>
-      </footer>`
+      </footer>`;
+      }
     },
     {
       id: 'FTR-05', name: '미니멀 싱글 호라이즌 갤러리 푸터',
       desc: '군더더기 없이 단 한 줄의 수평선과 로고·저작권만 남긴 하이엔드 미니멀리즘',
-      render: (w) => `<footer style="padding:36px var(--sec-px);background:var(--bg);display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:16px;font-size:12px;color:var(--sub);">
+      render: (w, ctx) => {
+        const navItems = getSiteNavLinks(w, ctx);
+        return `<footer style="padding:36px var(--sec-px);background:var(--bg);display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:16px;font-size:12px;color:var(--sub);">
         <span style="font-family:var(--font-display);font-size:18px;font-weight:700;color:var(--fg);">${w.brand}</span>
-        <span>${w.edition} · SEOUL / PARIS / TOKYO</span>
+        <div style="display:flex;gap:18px;flex-wrap:wrap;">${navItems.map(it=>renderPageNavLink(it, 'color:var(--sub);')).join('')}</div>
         <span>© 2026 ${w.brand}</span>
-      </footer>`
+      </footer>`;
+      }
     },
     {
       id: 'FTR-06', name: '아틀리에 저널 구독 박스 & 사이트맵 푸터',
       desc: '우아한 세리프 뉴스레터 박스와 하단 메뉴 바가 결합된 부티크 푸터',
-      render: (w, ctx) => `<footer style="padding:56px var(--sec-px) 32px;background:var(--surface);">
+      render: (w, ctx) => {
+        const navItems = getSiteNavLinks(w, ctx);
+        return `<footer style="padding:56px var(--sec-px) 32px;background:var(--surface);">
         <div class="f-container" style="padding:0;">
           <div class="f-card fg-12" style="margin-bottom:36px;padding:32px;">
             <div class="fc-7"><h3 class="f-h2" style="font-size:24px;">계절의 소식과 프라이빗 초청장을 받아보세요</h3><p style="margin:6px 0 0;font-size:13px;color:var(--sub);">스팸 없이 분기별 아카이브 저널과 멤버십 혜택을 전해드립니다.</p></div>
             <div class="fc-5" style="display:flex;justify-content:flex-end;" onclick="showStudioToast('뉴스레터 구독 신청이 완료되었습니다.')">${ctx.btn('저널 구독하기')}</div>
           </div>
-          <div style="display:flex;flex-wrap:wrap;justify-content:space-between;font-size:12px;color:var(--sub);"><span>© 2026 ${w.brand}. Crafted with FORMA STUDIO.</span><span>${w.nav.join('  ·  ')}</span></div>
+          <div style="display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px;font-size:12px;color:var(--sub);"><span>© 2026 ${w.brand}. Crafted with FORMA STUDIO.</span><span style="display:flex;gap:14px;flex-wrap:wrap;">${navItems.map(it=>renderPageNavLink(it, 'color:var(--sub);')).join('')}</span></div>
         </div>
-      </footer>`
+      </footer>`;
+      }
     },
     {
       id: 'FTR-07', name: '글로벌 3대 거점 좌표·타임존 아키텍처 푸터',
       desc: '서울·파리·뉴욕 플래그십의 위도·경도와 현지 시간을 표기하는 글로벌 럭셔리 푸터',
-      render: (w) => `<footer style="padding:52px var(--sec-px) 30px;background:var(--surface);border-top:1px solid var(--border);">
+      render: (w, ctx) => {
+        const navItems = getSiteNavLinks(w, ctx);
+        return `<footer style="padding:52px var(--sec-px) 30px;background:var(--surface);border-top:1px solid var(--border);">
         <div class="f-container" style="padding:0;">
           <div class="fg-3" style="padding-bottom:34px;border-bottom:1px solid var(--border);">
             <div><div class="f-mono" style="font-size:12px;color:var(--accent);">SEOUL FLAGSHIP</div><div style="font-size:15px;font-weight:700;margin-top:6px;">37.5796° N, 126.9707° E</div><div style="font-size:12px;color:var(--sub);margin-top:4px;">종로구 서촌 아카이브 · KST (UTC+9)</div></div>
             <div><div class="f-mono" style="font-size:12px;color:var(--accent);">PARIS SALON</div><div style="font-size:15px;font-weight:700;margin-top:6px;">48.8566° N, 2.3522° E</div><div style="font-size:12px;color:var(--sub);margin-top:4px;">Rue des Francs-Bourgeois · CET</div></div>
             <div><div class="f-mono" style="font-size:12px;color:var(--accent);">NEW YORK DESK</div><div style="font-size:15px;font-weight:700;margin-top:6px;">40.7128° N, 74.0060° W</div><div style="font-size:12px;color:var(--sub);margin-top:4px;">SoHo Mercer Street · EST</div></div>
           </div>
-          <div style="padding-top:18px;display:flex;justify-content:space-between;font-size:12px;color:var(--sub);"><span>${w.brand} — ${w.edition}</span><span>© 2026 ALL RIGHTS RESERVED</span></div>
+          <div style="padding-top:18px;display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:12px;font-size:12px;color:var(--sub);"><span>${w.brand} — ${w.edition}</span><div style="display:flex;gap:16px;flex-wrap:wrap;">${navItems.map(it=>renderPageNavLink(it, 'color:var(--sub);')).join('')}</div><span>© 2026 ALL RIGHTS RESERVED</span></div>
         </div>
-      </footer>`
+      </footer>`;
+      }
     },
     {
       id: 'FTR-08', name: '스위스 보더 그리드 모듈러 콜로폰 푸터',
       desc: '노출된 실선 격자 셀 안에 브랜드·메뉴·문의처를 칼같이 구획한 모더니즘 푸터',
-      render: (w, ctx) => `<footer style="border-top:1.5px solid var(--fg);background:var(--bg);">
+      render: (w, ctx) => {
+        const navItems = getSiteNavLinks(w, ctx);
+        return `<footer style="border-top:1.5px solid var(--fg);background:var(--bg);">
         <div class="fg-4" style="gap:0;">
           <div style="padding:32px 24px;border-right:1.5px solid var(--fg);"><div style="font-family:var(--font-display);font-size:22px;font-weight:800;">${w.brand}</div><div class="f-mono" style="font-size:12px;color:var(--sub);margin-top:8px;">${w.edition}</div></div>
-          <div style="padding:32px 24px;border-right:1.5px solid var(--fg);font-size:13px;">${w.nav.map(n=>`<div style="margin-bottom:6px;">→ ${n}</div>`).join('')}</div>
+          <div style="padding:32px 24px;border-right:1.5px solid var(--fg);font-size:13px;">${navItems.map(it=>`<div style="margin-bottom:6px;">→ ${renderPageNavLink(it, 'color:var(--fg);')}</div>`).join('')}</div>
           <div style="padding:32px 24px;border-right:1.5px solid var(--fg);font-size:13px;"><div class="f-mono" style="font-size:12px;color:var(--accent);margin-bottom:6px;">CONCIERGE</div><div>02 · 555 · 8200</div><div style="color:var(--sub);margin-top:4px;">SEOUL / BERLIN</div></div>
           <div style="padding:32px 24px;display:flex;align-items:center;justify-content:center;" onclick="document.getElementById('sec-form')?.scrollIntoView({behavior:'smooth'})">${ctx.btn(w.ctaPrimary)}</div>
         </div>
-      </footer>`
+      </footer>`;
+      }
     }
   ]
 });
