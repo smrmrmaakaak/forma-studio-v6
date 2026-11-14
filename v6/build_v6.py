@@ -241,6 +241,7 @@ html = f"""<!DOCTYPE html>
     <button type="button" onclick="editSelectedUITextInline()" style="color:#FDE047;" title="더블클릭 또는 이 버튼으로 글자 바로 수정">✏️ 글자수정</button>
     <button type="button" onclick="openPhotoPickerForSelectedUI('photo')" style="color:#6EE7B7;" title="내 컴퓨터 사진 업로드 또는 스튜디오 HD 화보 교체">🖼 사진교체</button>
     <button type="button" onclick="inspectSelectedUICategory()" style="color:#7DD3FC;" title="이 요소와 같은 종류의 다른 디자인 보기">🎨 스타일교체</button>
+    <button type="button" class="st-mobile-only-btn" onclick="toggleMobileInspector(true)" style="color:#C4B5FD;" title="상세 속성·레이어 패널 열기">🎛 속성</button>
     <label class="st-color-chip" title="배경 색상 직접 지정">
       <span>배경</span>
       <input type="color" value="#8C5A32" oninput="setSelectedUICustomStyle('bgColor', this.value)" />
@@ -346,6 +347,7 @@ html = f"""<!DOCTYPE html>
         </div>
 
         <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
+          <button type="button" id="mobile-insp-toggle-btn" class="st-pill-btn st-mobile-only-btn" onclick="toggleMobileInspector()" style="padding:2px 7px;font-size:11px;color:#C4B5FD;border-color:rgba(196,181,253,0.35);" title="상세 속성·레이어 패널 열기/닫기">🎛 속성·레이어</button>
           <span id="st-autosave-status" data-testid="autosave-status" data-saved="true" class="f-mono" style="font-size:11px;color:#34D399;padding:2px 6px;">✓ 자동 저장됨</span>
           <div class="st-mode-switch" style="padding:2px;">
             <button type="button" id="vp-btn-desktop" data-testid="vp-desktop" class="st-mode-btn is-active" onclick="setViewportSize('desktop')" style="padding:2px 7px;font-size:11px;" title="데스크톱 뷰포트 (100%)">🖥</button>

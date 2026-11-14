@@ -85,6 +85,10 @@
 
     if (!panel.querySelector('[data-testid="insp-x"]') || !panel.querySelector('#st-insp-pane-layers [data-testid="layer-tree"]')) {
       panel.innerHTML = `
+        <div class="st-insp-mobile-head">
+          <strong style="font-size:11px;color:#38BDF8;letter-spacing:0.05em;">🎛 속성 · 인터랙션 · 레이어</strong>
+          <button type="button" class="st-pill-btn" onclick="toggleMobileInspector(false)" style="padding:3px 9px;font-size:11px;color:#FCA5A5;">✕ 닫기</button>
+        </div>
         <div class="st-insp-align-bar" style="display:grid;grid-template-columns:repeat(8,1fr);gap:2px;padding:6px;background:#080A0F;border-bottom:1px solid rgba(255,255,255,0.08);flex-shrink:0;">
           <button type="button" data-testid="align-left" class="st-insp-tab" onclick="FORMA_PRO.SelectionEngine.alignSelection('left')" title="왼쪽 정렬">⊢</button>
           <button type="button" data-testid="align-center-x" class="st-insp-tab" onclick="FORMA_PRO.SelectionEngine.alignSelection('center-x')" title="가로 중앙 정렬">⫿</button>
@@ -1141,12 +1145,38 @@
     globalRoot.FORMA_PRO.InteractionsEngine?.syncInteractInputsFromElement?.(selEl, key);
   }
 
+  function toggleMobileInspector(force) {
+    if (typeof document === 'undefined') return false;
+    const panel = document.getElementById('st-right-panel');
+    if (!panel || !panel.classList) return false;
+    const nextOpen = typeof force === 'boolean' ? force : !panel.classList.contains('is-mobile-open');
+    panel.classList.toggle('is-mobile-open', nextOpen);
+    const btn = document.getElementById('mobile-insp-toggle-btn');
+    if (btn && btn.classList) btn.classList.toggle('is-active', nextOpen);
+    if (nextOpen) {
+      const s = getEngineState();
+      if (s && s.sidebarOpen && typeof globalRoot.window !== 'undefined' && globalRoot.window.innerWidth < 768) {
+        s.sidebarOpen = false;
+        document.getElementById('st-sidebar')?.classList?.add('is-collapsed');
+        const sbBtn = document.getElementById('sidebar-toggle-btn');
+        if (sbBtn) sbBtn.textContent = '◨ UI패널';
+      }
+      renderInspector();
+      renderLayerTree();
+      syncSelectionUI();
+    }
+    return nextOpen;
+  }
+
+  globalRoot.toggleMobileInspector = toggleMobileInspector;
+
   const InspectorUI = {
     hasCustomBinding: true,
     renderInspector,
     renderLayerTree,
     syncSelectionUI,
     switchTab,
+    toggleMobileInspector,
     toggleLayerVisibility,
     toggleLayerLock,
     moveLayerOrder,

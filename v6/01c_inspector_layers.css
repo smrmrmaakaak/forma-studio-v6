@@ -16,6 +16,7 @@ html:not(.is-client-mode) #st-right-panel {
   overflow-x: hidden;
   user-select: none;
   z-index: 35;
+  transition: transform 0.24s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 @media (max-width: 1320px) {
@@ -27,6 +28,76 @@ html:not(.is-client-mode) #st-right-panel {
     width: 220px;
     height: calc(100% - 72px);
     box-shadow: -12px 0 32px rgba(0, 0, 0, 0.55);
+  }
+}
+
+.st-insp-mobile-head,
+.st-mobile-only-btn {
+  display: none !important;
+}
+
+/* Mobile & Small Screen (< 768px): Hide right inspector by default unless .is-mobile-open is toggled */
+@media (max-width: 768px) {
+  .st-insp-mobile-head {
+    display: flex !important;
+    align-items: center;
+    justify-content: space-between;
+    padding: 7px 10px;
+    background: #06080d;
+    border-bottom: 1px solid rgba(56, 189, 248, 0.25);
+    flex-shrink: 0;
+  }
+  .st-mobile-only-btn {
+    display: inline-flex !important;
+  }
+  html:not(.is-client-mode) #st-right-panel {
+    position: fixed;
+    right: 0;
+    top: 72px;
+    bottom: 0;
+    width: min(86vw, 290px);
+    min-width: 0;
+    height: calc(100% - 72px);
+    z-index: 75;
+    transform: translateX(105%);
+    box-shadow: none;
+  }
+  html:not(.is-client-mode) #st-right-panel.is-mobile-open {
+    transform: translateX(0);
+    box-shadow: -18px 0 48px rgba(0, 0, 0, 0.78);
+  }
+  /* Allow natural vertical & horizontal finger scrolling on mobile unless an element is explicitly selected */
+  .f-site.is-move-mode .f-btn,
+  .f-site.is-move-mode .f-bdg,
+  .f-site.is-move-mode .f-media,
+  .f-site.is-move-mode .f-card,
+  .f-site.is-move-mode .f-input,
+  .f-site.is-move-mode h1,
+  .f-site.is-move-mode h2,
+  .f-site.is-move-mode h3,
+  .f-site.is-move-mode p,
+  .f-site.is-move-mode .f-lead {
+    touch-action: pan-x pan-y !important;
+  }
+  .f-site.is-move-mode [data-selected="true"],
+  .f-site.is-move-mode .f-free-ui[data-selected="true"] {
+    touch-action: none !important;
+  }
+  /* Enlarge 8-direction resize handles for finger touch on mobile */
+  .st-ui-sel-handle {
+    width: 14px !important;
+    height: 14px !important;
+  }
+  /* Always show section quick action pill on mobile so users don't need mouse hover */
+  .f-sec-pill {
+    opacity: 0.92 !important;
+    pointer-events: auto !important;
+    transform: translateY(0) !important;
+  }
+  .st-ui-toolbar {
+    max-width: calc(100vw - 16px) !important;
+    overflow-x: auto !important;
+    left: 8px !important;
   }
 }
 

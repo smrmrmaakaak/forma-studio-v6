@@ -1837,15 +1837,26 @@ body.is-dragging, body.is-dragging * {
 
 @media (max-width: 1080px) {
   .hide-narrow { display: none !important; }
-  .st-topbar { height: auto; min-height: 56px; padding: 2px 0; }
-  .st-topbar-row { height: auto; min-height: 26px; padding: 2px 4px; gap: 3px; flex-wrap: wrap; overflow-x: visible; }
-  .st-topbar-row + .st-topbar-row { height: auto; min-height: 26px; }
-  .st-topbar-row > div { gap: 2px !important; flex-wrap: wrap; }
+  .st-topbar { height: 72px; min-height: 72px; padding: 0; }
+  .st-topbar-row {
+    height: 37px;
+    min-height: 37px;
+    padding: 0 6px;
+    gap: 4px;
+    flex-wrap: nowrap !important;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+  .st-topbar-row + .st-topbar-row {
+    height: 34px;
+    min-height: 34px;
+  }
+  .st-topbar-row > div { gap: 3px !important; flex-wrap: nowrap !important; flex-shrink: 0; }
   .st-topbar .st-pill-btn,
-  .st-topbar .st-mode-btn { font-size: 10px !important; padding: 2px 4px !important; gap: 2px !important; }
+  .st-topbar .st-mode-btn { font-size: 10.5px !important; padding: 3px 6px !important; gap: 3px !important; }
   .st-topbar .st-world-select,
-  .st-topbar .st-select { font-size: 10px !important; padding: 2px 4px !important; max-width: 84px; }
-  #st-project-name-label { max-width: 56px !important; }
+  .st-topbar .st-select { font-size: 10.5px !important; padding: 3px 5px !important; max-width: 96px; }
+  #st-project-name-label { max-width: 64px !important; }
   .st-sidebar { width: 386px; min-width: 386px; --sec-zoom: 0.474; }
   .st-sidebar.is-wide { width: 500px; min-width: 500px; --sec-zoom: 0.624; }
   .st-sidebar.is-collapsed { margin-left: -386px; }
@@ -1860,11 +1871,11 @@ body.is-dragging, body.is-dragging * {
 
 @media (max-width: 659px) {
   .st-sidebar {
-    position: absolute; top: 0; bottom: 0; left: 0; z-index: 56;
-    width: 330px; min-width: 330px; --sec-zoom: 0.40;
-    box-shadow: 24px 0 60px rgba(0, 0, 0, 0.8);
+    position: absolute; top: 0; bottom: 0; left: 0; z-index: 76;
+    width: min(88vw, 330px); min-width: min(88vw, 330px); --sec-zoom: 0.39;
+    box-shadow: 24px 0 60px rgba(0, 0, 0, 0.85);
   }
-  .st-sidebar.is-collapsed { margin-left: -330px; box-shadow: none; }
+  .st-sidebar.is-collapsed { margin-left: -100vw; box-shadow: none; }
 }
 
 @media (max-height: 540px) {
@@ -2202,6 +2213,7 @@ html:not(.is-client-mode) #st-right-panel {
   overflow-x: hidden;
   user-select: none;
   z-index: 35;
+  transition: transform 0.24s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 @media (max-width: 1320px) {
@@ -2213,6 +2225,76 @@ html:not(.is-client-mode) #st-right-panel {
     width: 220px;
     height: calc(100% - 72px);
     box-shadow: -12px 0 32px rgba(0, 0, 0, 0.55);
+  }
+}
+
+.st-insp-mobile-head,
+.st-mobile-only-btn {
+  display: none !important;
+}
+
+/* Mobile & Small Screen (< 768px): Hide right inspector by default unless .is-mobile-open is toggled */
+@media (max-width: 768px) {
+  .st-insp-mobile-head {
+    display: flex !important;
+    align-items: center;
+    justify-content: space-between;
+    padding: 7px 10px;
+    background: #06080d;
+    border-bottom: 1px solid rgba(56, 189, 248, 0.25);
+    flex-shrink: 0;
+  }
+  .st-mobile-only-btn {
+    display: inline-flex !important;
+  }
+  html:not(.is-client-mode) #st-right-panel {
+    position: fixed;
+    right: 0;
+    top: 72px;
+    bottom: 0;
+    width: min(86vw, 290px);
+    min-width: 0;
+    height: calc(100% - 72px);
+    z-index: 75;
+    transform: translateX(105%);
+    box-shadow: none;
+  }
+  html:not(.is-client-mode) #st-right-panel.is-mobile-open {
+    transform: translateX(0);
+    box-shadow: -18px 0 48px rgba(0, 0, 0, 0.78);
+  }
+  /* Allow natural vertical & horizontal finger scrolling on mobile unless an element is explicitly selected */
+  .f-site.is-move-mode .f-btn,
+  .f-site.is-move-mode .f-bdg,
+  .f-site.is-move-mode .f-media,
+  .f-site.is-move-mode .f-card,
+  .f-site.is-move-mode .f-input,
+  .f-site.is-move-mode h1,
+  .f-site.is-move-mode h2,
+  .f-site.is-move-mode h3,
+  .f-site.is-move-mode p,
+  .f-site.is-move-mode .f-lead {
+    touch-action: pan-x pan-y !important;
+  }
+  .f-site.is-move-mode [data-selected="true"],
+  .f-site.is-move-mode .f-free-ui[data-selected="true"] {
+    touch-action: none !important;
+  }
+  /* Enlarge 8-direction resize handles for finger touch on mobile */
+  .st-ui-sel-handle {
+    width: 14px !important;
+    height: 14px !important;
+  }
+  /* Always show section quick action pill on mobile so users don't need mouse hover */
+  .f-sec-pill {
+    opacity: 0.92 !important;
+    pointer-events: auto !important;
+    transform: translateY(0) !important;
+  }
+  .st-ui-toolbar {
+    max-width: calc(100vw - 16px) !important;
+    overflow-x: auto !important;
+    left: 8px !important;
   }
 }
 
@@ -2479,6 +2561,7 @@ html.is-client-mode #st-right-panel,
     <button type="button" onclick="editSelectedUITextInline()" style="color:#FDE047;" title="더블클릭 또는 이 버튼으로 글자 바로 수정">✏️ 글자수정</button>
     <button type="button" onclick="openPhotoPickerForSelectedUI('photo')" style="color:#6EE7B7;" title="내 컴퓨터 사진 업로드 또는 스튜디오 HD 화보 교체">🖼 사진교체</button>
     <button type="button" onclick="inspectSelectedUICategory()" style="color:#7DD3FC;" title="이 요소와 같은 종류의 다른 디자인 보기">🎨 스타일교체</button>
+    <button type="button" class="st-mobile-only-btn" onclick="toggleMobileInspector(true)" style="color:#C4B5FD;" title="상세 속성·레이어 패널 열기">🎛 속성</button>
     <label class="st-color-chip" title="배경 색상 직접 지정">
       <span>배경</span>
       <input type="color" value="#8C5A32" oninput="setSelectedUICustomStyle('bgColor', this.value)" />
@@ -2584,6 +2667,7 @@ html.is-client-mode #st-right-panel,
         </div>
 
         <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
+          <button type="button" id="mobile-insp-toggle-btn" class="st-pill-btn st-mobile-only-btn" onclick="toggleMobileInspector()" style="padding:2px 7px;font-size:11px;color:#C4B5FD;border-color:rgba(196,181,253,0.35);" title="상세 속성·레이어 패널 열기/닫기">🎛 속성·레이어</button>
           <span id="st-autosave-status" data-testid="autosave-status" data-saved="true" class="f-mono" style="font-size:11px;color:#34D399;padding:2px 6px;">✓ 자동 저장됨</span>
           <div class="st-mode-switch" style="padding:2px;">
             <button type="button" id="vp-btn-desktop" data-testid="vp-desktop" class="st-mode-btn is-active" onclick="setViewportSize('desktop')" style="padding:2px 7px;font-size:11px;" title="데스크톱 뷰포트 (100%)">🖥</button>
@@ -9321,7 +9405,12 @@ function toggleSidebar() {
   document.getElementById('st-sidebar')?.classList.toggle('is-collapsed', !state.sidebarOpen);
   const btn = document.getElementById('sidebar-toggle-btn');
   if (btn) btn.textContent = state.sidebarOpen ? '◧' : '◨ UI패널';
-  if (state.sidebarOpen) setTimeout(syncDrawerSectionZoom, 260);
+  if (state.sidebarOpen) {
+    if (typeof window !== 'undefined' && window.innerWidth < 768 && typeof toggleMobileInspector === 'function') {
+      toggleMobileInspector(false);
+    }
+    setTimeout(syncDrawerSectionZoom, 260);
+  }
 }
 
 function setSideTab(tab) {
@@ -9355,6 +9444,9 @@ function setViewportSize(vp) {
   });
   if (typeof FORMA_PRO !== 'undefined' && FORMA_PRO.ResponsiveEngine?.applyViewportState) {
     FORMA_PRO.ResponsiveEngine.applyViewportState(vp);
+  }
+  if (!inClient && typeof window !== 'undefined' && window.innerWidth < 660) {
+    zoomCanvasToFit();
   }
   syncSelectedUIOverlay();
 }
@@ -9536,6 +9628,9 @@ function equipAsset(catKey, assetId, jumpToBuilder = false) {
   }
   if (CATEGORIES.find(c => c.key === catKey)?.group === 'section') {
     state.secEnabled[catKey] = true;
+  }
+  if (typeof window !== 'undefined' && window.innerWidth < 660 && state.sidebarOpen) {
+    toggleSidebar();
   }
   clearSelectedCanvasUI();
   renderQuickSubbar();
@@ -11248,11 +11343,20 @@ function initDragAndDropSystem() {
 
   // 2. Direct On-Canvas UI Manipulation: Grab & Move ANY UI Element right on the Webpage (+ Double-Click to Edit Text)!
   const mount = document.getElementById('website-mount');
+  let lastTouchTapTime = 0;
+  let lastTouchTapEl = null;
+
   if (frame && typeof frame.addEventListener === 'function') {
     frame.addEventListener('pointerdown', (e) => {
       if (e.button && e.button !== 0) return;
       if (e.target === frame || e.target.id === 'canvas-zoom-sizer' || e.target.id === 'canvas-zoom-stage') {
         hideCanvasContextMenu();
+        if (e.pointerType === 'touch') {
+          if (typeof toggleMobileInspector === 'function') toggleMobileInspector(false);
+          if (typeof window !== 'undefined' && window.innerWidth < 660 && state.sidebarOpen) toggleSidebar();
+          clearSelectedCanvasUI();
+          return;
+        }
         if (typeof FORMA_PRO !== 'undefined' && FORMA_PRO.SelectionEngine?.startMarqueeSelection) {
           FORMA_PRO.SelectionEngine.startMarqueeSelection(e);
         } else {
@@ -11308,6 +11412,10 @@ function initDragAndDropSystem() {
     mount.addEventListener('pointerdown', (e) => {
       hideCanvasContextMenu();
       if (typeof FORMA_PRO !== 'undefined' && FORMA_PRO.ClientMode?.isClientMode?.()) return;
+      if (e.pointerType === 'touch') {
+        if (typeof toggleMobileInspector === 'function') toggleMobileInspector(false);
+        if (typeof window !== 'undefined' && window.innerWidth < 660 && state.sidebarOpen) toggleSidebar();
+      }
       if (!state.canvasMoveMode || state.inlineEdit || state.presentation) return;
       if (e.button && e.button !== 0) return;
       if (e.target.closest?.('.f-sec-pill, .f-sec-resize-bar')) return;
@@ -11323,6 +11431,10 @@ function initDragAndDropSystem() {
         : e.target.closest?.('.f-free-ui, .f-btn, .f-bdg, .f-media, .f-input, h1, h2, h3, p, .f-lead, .f-card');
 
       if (!movable) {
+        if (e.pointerType === 'touch') {
+          clearSelectedCanvasUI();
+          return;
+        }
         e.preventDefault();
         if (selEngine) {
           selEngine.startMarqueeSelection(e);
@@ -11330,6 +11442,32 @@ function initDragAndDropSystem() {
           clearSelectedCanvasUI();
         }
         return;
+      }
+
+      if (e.pointerType === 'touch') {
+        const now = Date.now();
+        if (lastTouchTapEl === movable && now - lastTouchTapTime < 340) {
+          lastTouchTapTime = 0;
+          lastTouchTapEl = null;
+          e.preventDefault();
+          selectCanvasUIElement(movable);
+          startInlineTextEditOnElement(movable);
+          return;
+        }
+        lastTouchTapTime = now;
+        lastTouchTapEl = movable;
+
+        const wasAlreadySelected = selEngine
+          ? selEngine.isSelectedElement(movable)
+          : (selectedCanvasEl === movable);
+        if (!wasAlreadySelected) {
+          if (selEngine) {
+            selEngine.selectSingle(movable);
+          } else {
+            selectCanvasUIElement(movable);
+          }
+          return;
+        }
       }
 
       // Prevent native button clicks / text selection while moving UI directly
@@ -13690,14 +13828,20 @@ window.addEventListener('DOMContentLoaded', () => {
   }
 
   syncStudioViewportHeight();
+  const isNarrowMobileBoot = typeof window !== 'undefined' && window.innerWidth < 660;
   // Keep the pure visual UI tray OPEN side-by-side next to the live canvas on Desktop & Inline embeds (>= 660px)!
-  if (typeof window !== 'undefined' && window.innerWidth < 660) {
+  if (isNarrowMobileBoot) {
     state.sidebarOpen = false;
     document.getElementById('st-sidebar')?.classList.add('is-collapsed');
     const btn = document.getElementById('sidebar-toggle-btn');
     if (btn) btn.textContent = '◨ UI패널';
   }
-  window.addEventListener('resize', syncStudioViewportHeight);
+  window.addEventListener('resize', () => {
+    syncStudioViewportHeight();
+    if (typeof window !== 'undefined' && window.innerWidth < 660) {
+      zoomCanvasToFit();
+    }
+  });
   window.addEventListener('beforeunload', () => {
     FORMA_PRO.ProjectState?.flushAutosaveNow?.();
   });
@@ -13707,6 +13851,10 @@ window.addEventListener('DOMContentLoaded', () => {
   renderQuickSubbar();
   renderSidebarBody();
   renderLiveWebsite();
+  if (isNarrowMobileBoot) {
+    setViewportSize('mobile');
+    zoomCanvasToFit();
+  }
   initDragAndDropSystem();
   initCustomCursorSystem();
   FORMA_PRO.ProjectState?.hydrateProjectStateFromIDBAsync?.();
@@ -15876,6 +16024,10 @@ window.addEventListener('DOMContentLoaded', () => {
 
     if (!panel.querySelector('[data-testid="insp-x"]') || !panel.querySelector('#st-insp-pane-layers [data-testid="layer-tree"]')) {
       panel.innerHTML = `
+        <div class="st-insp-mobile-head">
+          <strong style="font-size:11px;color:#38BDF8;letter-spacing:0.05em;">🎛 속성 · 인터랙션 · 레이어</strong>
+          <button type="button" class="st-pill-btn" onclick="toggleMobileInspector(false)" style="padding:3px 9px;font-size:11px;color:#FCA5A5;">✕ 닫기</button>
+        </div>
         <div class="st-insp-align-bar" style="display:grid;grid-template-columns:repeat(8,1fr);gap:2px;padding:6px;background:#080A0F;border-bottom:1px solid rgba(255,255,255,0.08);flex-shrink:0;">
           <button type="button" data-testid="align-left" class="st-insp-tab" onclick="FORMA_PRO.SelectionEngine.alignSelection('left')" title="왼쪽 정렬">⊢</button>
           <button type="button" data-testid="align-center-x" class="st-insp-tab" onclick="FORMA_PRO.SelectionEngine.alignSelection('center-x')" title="가로 중앙 정렬">⫿</button>
@@ -16932,12 +17084,38 @@ window.addEventListener('DOMContentLoaded', () => {
     globalRoot.FORMA_PRO.InteractionsEngine?.syncInteractInputsFromElement?.(selEl, key);
   }
 
+  function toggleMobileInspector(force) {
+    if (typeof document === 'undefined') return false;
+    const panel = document.getElementById('st-right-panel');
+    if (!panel || !panel.classList) return false;
+    const nextOpen = typeof force === 'boolean' ? force : !panel.classList.contains('is-mobile-open');
+    panel.classList.toggle('is-mobile-open', nextOpen);
+    const btn = document.getElementById('mobile-insp-toggle-btn');
+    if (btn && btn.classList) btn.classList.toggle('is-active', nextOpen);
+    if (nextOpen) {
+      const s = getEngineState();
+      if (s && s.sidebarOpen && typeof globalRoot.window !== 'undefined' && globalRoot.window.innerWidth < 768) {
+        s.sidebarOpen = false;
+        document.getElementById('st-sidebar')?.classList?.add('is-collapsed');
+        const sbBtn = document.getElementById('sidebar-toggle-btn');
+        if (sbBtn) sbBtn.textContent = '◨ UI패널';
+      }
+      renderInspector();
+      renderLayerTree();
+      syncSelectionUI();
+    }
+    return nextOpen;
+  }
+
+  globalRoot.toggleMobileInspector = toggleMobileInspector;
+
   const InspectorUI = {
     hasCustomBinding: true,
     renderInspector,
     renderLayerTree,
     syncSelectionUI,
     switchTab,
+    toggleMobileInspector,
     toggleLayerVisibility,
     toggleLayerLock,
     moveLayerOrder,

@@ -1400,15 +1400,26 @@ body.is-dragging, body.is-dragging * {
 
 @media (max-width: 1080px) {
   .hide-narrow { display: none !important; }
-  .st-topbar { height: auto; min-height: 56px; padding: 2px 0; }
-  .st-topbar-row { height: auto; min-height: 26px; padding: 2px 4px; gap: 3px; flex-wrap: wrap; overflow-x: visible; }
-  .st-topbar-row + .st-topbar-row { height: auto; min-height: 26px; }
-  .st-topbar-row > div { gap: 2px !important; flex-wrap: wrap; }
+  .st-topbar { height: 72px; min-height: 72px; padding: 0; }
+  .st-topbar-row {
+    height: 37px;
+    min-height: 37px;
+    padding: 0 6px;
+    gap: 4px;
+    flex-wrap: nowrap !important;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+  .st-topbar-row + .st-topbar-row {
+    height: 34px;
+    min-height: 34px;
+  }
+  .st-topbar-row > div { gap: 3px !important; flex-wrap: nowrap !important; flex-shrink: 0; }
   .st-topbar .st-pill-btn,
-  .st-topbar .st-mode-btn { font-size: 10px !important; padding: 2px 4px !important; gap: 2px !important; }
+  .st-topbar .st-mode-btn { font-size: 10.5px !important; padding: 3px 6px !important; gap: 3px !important; }
   .st-topbar .st-world-select,
-  .st-topbar .st-select { font-size: 10px !important; padding: 2px 4px !important; max-width: 84px; }
-  #st-project-name-label { max-width: 56px !important; }
+  .st-topbar .st-select { font-size: 10.5px !important; padding: 3px 5px !important; max-width: 96px; }
+  #st-project-name-label { max-width: 64px !important; }
   .st-sidebar { width: 386px; min-width: 386px; --sec-zoom: 0.474; }
   .st-sidebar.is-wide { width: 500px; min-width: 500px; --sec-zoom: 0.624; }
   .st-sidebar.is-collapsed { margin-left: -386px; }
@@ -1423,11 +1434,11 @@ body.is-dragging, body.is-dragging * {
 
 @media (max-width: 659px) {
   .st-sidebar {
-    position: absolute; top: 0; bottom: 0; left: 0; z-index: 56;
-    width: 330px; min-width: 330px; --sec-zoom: 0.40;
-    box-shadow: 24px 0 60px rgba(0, 0, 0, 0.8);
+    position: absolute; top: 0; bottom: 0; left: 0; z-index: 76;
+    width: min(88vw, 330px); min-width: min(88vw, 330px); --sec-zoom: 0.39;
+    box-shadow: 24px 0 60px rgba(0, 0, 0, 0.85);
   }
-  .st-sidebar.is-collapsed { margin-left: -330px; box-shadow: none; }
+  .st-sidebar.is-collapsed { margin-left: -100vw; box-shadow: none; }
 }
 
 @media (max-height: 540px) {

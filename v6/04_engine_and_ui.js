@@ -482,7 +482,12 @@ function toggleSidebar() {
   document.getElementById('st-sidebar')?.classList.toggle('is-collapsed', !state.sidebarOpen);
   const btn = document.getElementById('sidebar-toggle-btn');
   if (btn) btn.textContent = state.sidebarOpen ? '◧' : '◨ UI패널';
-  if (state.sidebarOpen) setTimeout(syncDrawerSectionZoom, 260);
+  if (state.sidebarOpen) {
+    if (typeof window !== 'undefined' && window.innerWidth < 768 && typeof toggleMobileInspector === 'function') {
+      toggleMobileInspector(false);
+    }
+    setTimeout(syncDrawerSectionZoom, 260);
+  }
 }
 
 function setSideTab(tab) {
@@ -516,6 +521,9 @@ function setViewportSize(vp) {
   });
   if (typeof FORMA_PRO !== 'undefined' && FORMA_PRO.ResponsiveEngine?.applyViewportState) {
     FORMA_PRO.ResponsiveEngine.applyViewportState(vp);
+  }
+  if (!inClient && typeof window !== 'undefined' && window.innerWidth < 660) {
+    zoomCanvasToFit();
   }
   syncSelectedUIOverlay();
 }
@@ -697,6 +705,9 @@ function equipAsset(catKey, assetId, jumpToBuilder = false) {
   }
   if (CATEGORIES.find(c => c.key === catKey)?.group === 'section') {
     state.secEnabled[catKey] = true;
+  }
+  if (typeof window !== 'undefined' && window.innerWidth < 660 && state.sidebarOpen) {
+    toggleSidebar();
   }
   clearSelectedCanvasUI();
   renderQuickSubbar();
@@ -2409,11 +2420,20 @@ function initDragAndDropSystem() {
 
   // 2. Direct On-Canvas UI Manipulation: Grab & Move ANY UI Element right on the Webpage (+ Double-Click to Edit Text)!
   const mount = document.getElementById('website-mount');
+  let lastTouchTapTime = 0;
+  let lastTouchTapEl = null;
+
   if (frame && typeof frame.addEventListener === 'function') {
     frame.addEventListener('pointerdown', (e) => {
       if (e.button && e.button !== 0) return;
       if (e.target === frame || e.target.id === 'canvas-zoom-sizer' || e.target.id === 'canvas-zoom-stage') {
         hideCanvasContextMenu();
+        if (e.pointerType === 'touch') {
+          if (typeof toggleMobileInspector === 'function') toggleMobileInspector(false);
+          if (typeof window !== 'undefined' && window.innerWidth < 660 && state.sidebarOpen) toggleSidebar();
+          clearSelectedCanvasUI();
+          return;
+        }
         if (typeof FORMA_PRO !== 'undefined' && FORMA_PRO.SelectionEngine?.startMarqueeSelection) {
           FORMA_PRO.SelectionEngine.startMarqueeSelection(e);
         } else {
@@ -2469,6 +2489,10 @@ function initDragAndDropSystem() {
     mount.addEventListener('pointerdown', (e) => {
       hideCanvasContextMenu();
       if (typeof FORMA_PRO !== 'undefined' && FORMA_PRO.ClientMode?.isClientMode?.()) return;
+      if (e.pointerType === 'touch') {
+        if (typeof toggleMobileInspector === 'function') toggleMobileInspector(false);
+        if (typeof window !== 'undefined' && window.innerWidth < 660 && state.sidebarOpen) toggleSidebar();
+      }
       if (!state.canvasMoveMode || state.inlineEdit || state.presentation) return;
       if (e.button && e.button !== 0) return;
       if (e.target.closest?.('.f-sec-pill, .f-sec-resize-bar')) return;
@@ -2484,6 +2508,10 @@ function initDragAndDropSystem() {
         : e.target.closest?.('.f-free-ui, .f-btn, .f-bdg, .f-media, .f-input, h1, h2, h3, p, .f-lead, .f-card');
 
       if (!movable) {
+        if (e.pointerType === 'touch') {
+          clearSelectedCanvasUI();
+          return;
+        }
         e.preventDefault();
         if (selEngine) {
           selEngine.startMarqueeSelection(e);
@@ -2491,6 +2519,32 @@ function initDragAndDropSystem() {
           clearSelectedCanvasUI();
         }
         return;
+      }
+
+      if (e.pointerType === 'touch') {
+        const now = Date.now();
+        if (lastTouchTapEl === movable && now - lastTouchTapTime < 340) {
+          lastTouchTapTime = 0;
+          lastTouchTapEl = null;
+          e.preventDefault();
+          selectCanvasUIElement(movable);
+          startInlineTextEditOnElement(movable);
+          return;
+        }
+        lastTouchTapTime = now;
+        lastTouchTapEl = movable;
+
+        const wasAlreadySelected = selEngine
+          ? selEngine.isSelectedElement(movable)
+          : (selectedCanvasEl === movable);
+        if (!wasAlreadySelected) {
+          if (selEngine) {
+            selEngine.selectSingle(movable);
+          } else {
+            selectCanvasUIElement(movable);
+          }
+          return;
+        }
       }
 
       // Prevent native button clicks / text selection while moving UI directly
@@ -4851,14 +4905,20 @@ window.addEventListener('DOMContentLoaded', () => {
   }
 
   syncStudioViewportHeight();
+  const isNarrowMobileBoot = typeof window !== 'undefined' && window.innerWidth < 660;
   // Keep the pure visual UI tray OPEN side-by-side next to the live canvas on Desktop & Inline embeds (>= 660px)!
-  if (typeof window !== 'undefined' && window.innerWidth < 660) {
+  if (isNarrowMobileBoot) {
     state.sidebarOpen = false;
     document.getElementById('st-sidebar')?.classList.add('is-collapsed');
     const btn = document.getElementById('sidebar-toggle-btn');
     if (btn) btn.textContent = '◨ UI패널';
   }
-  window.addEventListener('resize', syncStudioViewportHeight);
+  window.addEventListener('resize', () => {
+    syncStudioViewportHeight();
+    if (typeof window !== 'undefined' && window.innerWidth < 660) {
+      zoomCanvasToFit();
+    }
+  });
   window.addEventListener('beforeunload', () => {
     FORMA_PRO.ProjectState?.flushAutosaveNow?.();
   });
@@ -4868,6 +4928,10 @@ window.addEventListener('DOMContentLoaded', () => {
   renderQuickSubbar();
   renderSidebarBody();
   renderLiveWebsite();
+  if (isNarrowMobileBoot) {
+    setViewportSize('mobile');
+    zoomCanvasToFit();
+  }
   initDragAndDropSystem();
   initCustomCursorSystem();
   FORMA_PRO.ProjectState?.hydrateProjectStateFromIDBAsync?.();
